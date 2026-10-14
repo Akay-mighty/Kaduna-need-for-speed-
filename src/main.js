@@ -54,9 +54,11 @@ document.getElementById('end-restart').addEventListener('click', () => {
   // Reset HUD state
   document.getElementById('lap-current').textContent = '1';
   document.getElementById('cp-current').textContent = '1';
+  document.getElementById('position-current').textContent = '1';
   document.getElementById('lap-time-last').textContent = '--:--.---';
   document.getElementById('lap-time-best').textContent = 'Best: ' + (game.race.bestLap ? formatTimeLocal(game.race.bestLap) : '--:--.---');
   game._refreshBestTime();
+  game._refreshGhostBadge();
   game.startRace();
 });
 
@@ -68,6 +70,11 @@ document.getElementById('end-menu').addEventListener('click', () => {
   game.started = false;
   document.getElementById('hud').classList.remove('active');
   document.getElementById('touch').classList.remove('active');
+  document.getElementById('boost-bar').classList.remove('active');
+  document.getElementById('boost-label').classList.remove('active');
+  // Clean up rivals + ghost when going back to menu
+  if (game.rivals) game.rivals.reset();
+  if (game.ghost) game.ghost.stopPlayback();
 });
 
 function formatTimeLocal(seconds) {

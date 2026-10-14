@@ -80,9 +80,9 @@ export class City {
     this._placeTaxis();
     this._placeBillboards();
 
-    report(95, 'Placing checkpoints…');
+    report(85, 'Placing checkpoints…');
     this._placeCheckpoints();
-    report(100, 'Done');
+    report(90, 'Loading Cybertruck…');
   }
 
   // ===== Ground =====

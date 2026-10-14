@@ -1,21 +1,36 @@
 // ============================================================
-// player.js — procedural low-poly Jeep with arcade physics
+// player.js — Tesla Cybertruck player car
 //
-// WHY PROCEDURAL:
-//   The uploaded jeep.glb had broken nested scales from the FBX→GLB
-//   converter — root Frame scale [300, 100, 50] but children with
-//   scale 50/55/27 at translations of 1.55/1.27. The resulting
-//   world-space wheel positions ended up hundreds of meters from
-//   the body. Instead of patching the GLB, we build a clean ~4m
-//   Jeep from primitives — fully controllable, looks the part.
+// Loads /models/cybertruck.glb (real PBR Cybertruck with 56 meshes,
+// 47 materials, 2 embedded JPEG textures — body steel + normal map).
+//
+// ORIENTATION FIX:
+//   The FBX exports the truck lying on its side: length along model-Y
+//   (from -18 to +18), width along model-X (-7.8 to +7.8), height along
+//   model-Z (-6.4 to +5.5). We rotate -90° on X so the length runs
+//   along world-Z (forward) and height runs along world-Y (up).
+//
+// SCALE FIX:
+//   The FBX unit is large (truck is 36m long in FBX units). Scale by
+//   0.165 to make it ~6m long (close to real Cybertruck 5.68m).
+//
+// WHEEL SPIN:
+//   The FBX bakes the 4 wheel meshes into the body geometry at fixed
+//   world positions, so they can't be spun individually without
+//   re-extracting them. We keep the truck as a rigid body — the whole
+//   body rotates with `this.heading` via the parent group, which is
+//   visually convincing enough for an arcade racer.
 //
 // PHYSICS:
-//   - Arcade: throttle, brake, reverse, speed-sensitive steering
-//   - Drift on SPACE (boosts turn rate + lateral slip)
-//   - Y locked to 0 — player can NEVER fall through the world
-//   - World-bounded by City.clampToTrack()
+//   Same arcade physics as before: throttle, brake, reverse,
+//   speed-sensitive steering, drift on SPACE, body lean, pitch.
+//   Y locked to 0 — can never fall through the world.
 // ============================================================
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const CYBERTRUCK_SCALE = 0.165;   // 36.3m FBX length → ~6m game length
+const ROT_X_MINUS_90 = -Math.PI / 2;
 
 export class Player {
   constructor(scene) {
@@ -24,184 +39,83 @@ export class Player {
     this.heading = 0;        // radians, 0 = facing +Z
     this.speed = 0;          // m/s along heading
     this.steer = 0;          // -1..1
-    this.driftAmount = 0;    // 0..1
-    this.wheelSpin = 0;
-    this.mesh = null;
-    this.wheels = [];
-    this.frontWheels = [];
-    this.bodyMat = null;
+    this.driftAmount = 0;    // 0..1 visual
+    this.mesh = null;        // parent group (positioned + rotated by heading)
+    this.body = null;        // the loaded GLB scene (rotated -90° X, scaled)
     this.brakeMat = null;
+    this.brakeStrip = null;
   }
 
   async load() {
-    // ===== Body materials =====
-    // Lagos-style sun-faded yellow Jeep
-    this.bodyMat = new THREE.MeshStandardMaterial({
-      color: 0xffb627, roughness: 0.55, metalness: 0.35,
-      emissive: 0x221100, emissiveIntensity: 0.05
+    const loader = new GLTFLoader();
+    const gltf = await loader.loadAsync('/models/cybertruck.glb');
+    this.body = gltf.scene;
+
+    // Rotate so model-Y (length) maps to world-Z (forward), and model-Z (height) maps to world-Y (up).
+    // After -90° X rotation: (x, y, z) → (x, z, -y), so model-Y(+18) → world-Z(-18). To flip the
+    // truck so it faces +Z instead of -Z, also rotate 180° on Y. Easier: rotate +90° X.
+    // +90° X: (x, y, z) → (x, -z, y). Model-Y(+18) → world-Z(+18) (forward = +Z ✓).
+    // Model-Z(+5.5 = roof) → world-Y(+5.5) (up ✓).
+    this.body.rotation.x = Math.PI / 2;
+
+    this.body.scale.setScalar(CYBERTRUCK_SCALE);
+
+    // After scaling: length = 36.3 * 0.165 = 5.99m along +Z, width = 15.6 * 0.165 = 2.57m, height = 12 * 0.165 = 1.98m
+    // Truck centered at origin in model space. After +90° X rotation, the truck spans:
+    //   X: [-7.8, 7.8] * 0.165 = [-1.29, 1.29]   (width)
+    //   Y: [-6.4, 5.5] * 0.165 = [-1.06, 0.91]  (height — wheels at -1.06, roof at +0.91)
+    //   Z: [-18, 18] * 0.165 = [-2.97, 2.97]    (length, forward = +Z)
+    // We want wheels at y=0, so lift the body by +1.06 (the wheel bottom)
+    this.body.position.y = 1.06;
+
+    // Enable shadows on all meshes
+    this.body.traverse(c => {
+      if (c.isMesh) {
+        c.castShadow = true;
+        c.receiveShadow = true;
+      }
     });
-    const blackMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.7, metalness: 0.3 });
-    const glassMat = new THREE.MeshStandardMaterial({
-      color: 0x101418, roughness: 0.1, metalness: 0.9,
-      transparent: true, opacity: 0.7
+
+    // ===== Headlight spotlights (so the truck actually lights the road ahead) =====
+    const headlightL = new THREE.SpotLight(0xfff5d6, 1.6, 35, Math.PI / 6, 0.4, 1.5);
+    headlightL.position.set(-0.9, 0.7, 2.8);
+    headlightL.target.position.set(-0.9, 0, 25);
+    this.body.add(headlightL);
+    this.body.add(headlightL.target);
+
+    const headlightR = new THREE.SpotLight(0xfff5d6, 1.6, 35, Math.PI / 6, 0.4, 1.5);
+    headlightR.position.set(0.9, 0.7, 2.8);
+    headlightR.target.position.set(0.9, 0, 25);
+    this.body.add(headlightR);
+    this.body.add(headlightR.target);
+
+    // ===== Brake light strip (illuminates when braking) =====
+    // The Cybertruck GLB already has LED materials, but we add a glowing strip
+    // for a clear brake indicator that brightens on input.brake
+    this.brakeMat = new THREE.MeshBasicMaterial({
+      color: 0x550000, transparent: true, opacity: 0.85
     });
-    this.brakeMat = new THREE.MeshBasicMaterial({ color: 0x660000 });
-
-    const grp = new THREE.Group();
-
-    // ===== Chassis (low box) =====
-    const chassis = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.4, 4.0), blackMat);
-    chassis.position.y = 0.7;
-    chassis.castShadow = true;
-    grp.add(chassis);
-
-    // ===== Body (the yellow box on top) =====
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.7, 3.0), this.bodyMat);
-    body.position.y = 1.1;
-    body.position.z = -0.2;
-    body.castShadow = true;
-    grp.add(body);
-
-    // Hood (sloped front)
-    const hood = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.5, 1.0), this.bodyMat);
-    hood.position.set(0, 1.05, 1.4);
-    hood.rotation.x = -0.08;
-    hood.castShadow = true;
-    grp.add(hood);
-
-    // Cabin (windshield frame — just two side pillars + a roof)
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.1, 1.6), this.bodyMat);
-    roof.position.set(0, 1.6, -0.3);
-    roof.castShadow = true;
-    grp.add(roof);
-    // Roll bar ( Jeep signature)
-    const rollBar = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.5, 8), blackMat);
-    rollBar.position.set(0, 1.85, -0.3);
-    rollBar.rotation.z = Math.PI / 2;
-    grp.add(rollBar);
-
-    // Windshield (sloped glass in front of the cabin)
-    const windshield = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.6), glassMat);
-    windshield.position.set(0, 1.55, 0.55);
-    windshield.rotation.x = -Math.PI / 4;
-    grp.add(windshield);
-    // Rear window
-    const rearWin = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.5), glassMat);
-    rearWin.position.set(0, 1.5, -1.1);
-    rearWin.rotation.x = Math.PI / 4;
-    grp.add(rearWin);
-    // Side windows
-    for (const sx of [-1.01, 1.01]) {
-      const sw = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.45), glassMat);
-      sw.position.set(sx, 1.55, -0.3);
-      sw.rotation.y = sx < 0 ? Math.PI / 2 : -Math.PI / 2;
-      grp.add(sw);
-    }
-
-    // ===== Front grille + bumpers =====
-    const grille = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.3, 0.1), blackMat);
-    grille.position.set(0, 0.85, 2.0);
-    grp.add(grille);
-    // Front bumper
-    const frontBumper = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.25, 0.3), blackMat);
-    frontBumper.position.set(0, 0.5, 2.05);
-    frontBumper.castShadow = true;
-    grp.add(frontBumper);
-    // Rear bumper
-    const rearBumper = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.25, 0.3), blackMat);
-    rearBumper.position.set(0, 0.5, -2.05);
-    rearBumper.castShadow = true;
-    grp.add(rearBumper);
-
-    // ===== Headlights =====
-    const headMat = new THREE.MeshBasicMaterial({ color: 0xfff8d0 });
-    const headGeo = new THREE.CircleGeometry(0.18, 16);
-    for (const sx of [-0.65, 0.65]) {
-      const h = new THREE.Mesh(headGeo, headMat);
-      h.position.set(sx, 0.9, 2.05);
-      h.rotation.y = Math.PI;
-      grp.add(h);
-    }
-    // SpotLights (headlight beams)
-    const headlightL = new THREE.SpotLight(0xfff5d6, 1.8, 35, Math.PI / 6, 0.4, 1.5);
-    headlightL.position.set(-0.6, 0.9, 1.8);
-    headlightL.target.position.set(-0.6, 0, 20);
-    grp.add(headlightL);
-    grp.add(headlightL.target);
-
-    // ===== Taillights =====
-    const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2030 });
-    const tailGeo = new THREE.BoxGeometry(0.4, 0.15, 0.05);
-    for (const sx of [-0.6, 0.6]) {
-      const t = new THREE.Mesh(tailGeo, tailMat);
-      t.position.set(sx, 0.95, -2.05);
-      grp.add(t);
-    }
-    // Big brake light strip (illuminates when braking)
     this.brakeStrip = new THREE.Mesh(
-      new THREE.BoxGeometry(1.8, 0.08, 0.04),
+      new THREE.PlaneGeometry(1.8, 0.08),
       this.brakeMat
     );
-    this.brakeStrip.position.set(0, 0.95, -2.05);
-    grp.add(this.brakeStrip);
+    this.brakeStrip.position.set(0, 0.7, -3.0);   // just behind the truck
+    this.body.add(this.brakeStrip);
 
-    // ===== Wheels =====
-    const tireMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.85 });
-    const rimMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.9, roughness: 0.2 });
-    const tireGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.35, 16);
-    const rimGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.38, 8);
-    const offsets = [
-      { x: -1.0, z:  1.35, front: true },   // FL
-      { x:  1.0, z:  1.35, front: true },   // FR
-      { x: -1.0, z: -1.35, front: false },  // RL
-      { x:  1.0, z: -1.35, front: false },  // RR
-    ];
-    for (const o of offsets) {
-      const w = new THREE.Group();
-      const tire = new THREE.Mesh(tireGeo, tireMat);
-      tire.rotation.z = Math.PI / 2;
-      tire.castShadow = true;
-      w.add(tire);
-      const rim = new THREE.Mesh(rimGeo, rimMat);
-      rim.rotation.z = Math.PI / 2;
-      w.add(rim);
-      w.position.set(o.x, 0.55, o.z);
-      this.wheels.push(w);
-      if (o.front) this.frontWheels.push(w);
-      grp.add(w);
-    }
-
-    // Spare tire on the back (Jeep signature)
-    const spare = new THREE.Mesh(tireGeo, tireMat);
-    spare.position.set(0, 1.1, -2.1);
-    spare.scale.set(0.85, 1, 0.85);
-    spare.rotation.set(Math.PI / 2, 0, 0);
-    grp.add(spare);
-
-    // Body-color fender flares (give it the boxy Jeep look)
-    const flareMat = this.bodyMat;
-    for (const sx of [-1.05, 1.05]) {
-      for (const sz of [1.35, -1.35]) {
-        const flare = new THREE.Mesh(
-          new THREE.BoxGeometry(0.2, 0.3, 1.2),
-          flareMat
-        );
-        flare.position.set(sx, 0.85, sz);
-        flare.castShadow = true;
-        grp.add(flare);
-      }
-    }
-
-    // Soft contact shadow blob under the car
+    // ===== Soft contact shadow blob (cheap fake AO) =====
     const shadow = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.2, 5),
-      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.4, depthWrite: false })
+      new THREE.PlaneGeometry(3.5, 6.5),
+      new THREE.MeshBasicMaterial({
+        color: 0x000000, transparent: true, opacity: 0.4, depthWrite: false
+      })
     );
     shadow.rotation.x = -Math.PI / 2;
-    shadow.position.y = 0.02;
-    grp.add(shadow);
+    shadow.position.y = -1.05;   // just under the wheels (relative to body lift)
+    this.body.add(shadow);
 
-    this.mesh = grp;
+    // ===== Wrap in a parent group that we move/rotate via position + heading =====
+    this.mesh = new THREE.Group();
+    this.mesh.add(this.body);
     this.mesh.position.copy(this.pos);
     this.scene.add(this.mesh);
   }
@@ -212,21 +126,21 @@ export class Player {
     this.speed = 0;
     this.steer = 0;
     this.driftAmount = 0;
-    this.wheelSpin = 0;
     this.mesh.position.copy(this.pos);
     this.mesh.rotation.y = this.heading;
   }
 
-  update(dt, input) {
+  update(dt, input, boostMultiplier = 1.0) {
     // ===== Arcade physics =====
-    const accel = 22;
-    const maxSpeed = 45;
-    const reverseMax = -12;
-    const braking = 36;
+    const accel = 26;
+    const baseMaxSpeed = 55;
+    const maxSpeed = baseMaxSpeed * boostMultiplier;  // boost pads can raise this temporarily
+    const reverseMax = -15;
+    const braking = 40;
     const drag = 5;
 
     if (input.gas) {
-      this.speed += accel * dt;
+      this.speed += accel * (boostMultiplier > 1 ? 1.4 : 1) * dt;   // boost also speeds up acceleration
     } else if (input.brake) {
       if (this.speed > 0.5) this.speed -= braking * dt;
       else this.speed -= accel * 0.6 * dt;
@@ -239,9 +153,9 @@ export class Player {
     // ===== Steering =====
     const targetSteer = (input.left ? 1 : 0) - (input.right ? 1 : 0);
     this.steer += (targetSteer - this.steer) * Math.min(1, dt * 8);
-    const speedFactor = Math.min(1, Math.abs(this.speed) / 12);
+    const speedFactor = Math.min(1, Math.abs(this.speed) / 14);
     const driftBoost = input.drift ? 1.5 : 1.0;
-    const turn = this.steer * 2.0 * speedFactor * driftBoost * dt * Math.sign(this.speed || 1);
+    const turn = this.steer * 1.9 * speedFactor * driftBoost * dt * Math.sign(this.speed || 1);
     this.heading -= turn;
 
     // Drift visual amount
@@ -259,27 +173,16 @@ export class Player {
     this.mesh.position.copy(this.pos);
     this.mesh.rotation.y = this.heading;
 
-    // Body lean on turns
+    // Body lean on turns (visual roll)
     const lean = -this.steer * speedFactor * 0.06;
     this.mesh.rotation.z += (lean - this.mesh.rotation.z) * Math.min(1, dt * 6);
     // Pitch on accel/brake
     const pitch = (input.brake && this.speed > 0.5 ? 0.04 : 0) - (input.gas && this.speed > 0.5 ? 0.03 : 0);
     this.mesh.rotation.x += (pitch - this.mesh.rotation.x) * Math.min(1, dt * 6);
 
-    // ===== Wheels spin + steer =====
-    this.wheelSpin += this.speed * dt * 2.5;
-    this.wheels.forEach(w => {
-      // Spin around the wheel's X axis (which we set up via tire.rotation.z)
-      w.children[0].rotation.x = this.wheelSpin;   // tire
-      w.children[1].rotation.x = this.wheelSpin;   // rim
-    });
-    this.frontWheels.forEach(w => {
-      w.rotation.y = this.steer * 0.4;
-    });
-
     // ===== Brake light =====
-    const braking_now = input.brake && this.speed > 0.5;
-    this.brakeMat.color.setHex(braking_now ? 0xff2030 : 0x660000);
+    const brakingNow = input.brake && this.speed > 0.5;
+    this.brakeMat.color.setHex(brakingNow ? 0xff2030 : 0x550000);
   }
 
   getForward() {
@@ -291,6 +194,6 @@ export class Player {
   }
 
   getSpeedFactor() {
-    return Math.min(1, Math.abs(this.speed) / 45);
+    return Math.min(1, Math.abs(this.speed) / 55);
   }
 }
