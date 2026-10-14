@@ -1,12 +1,12 @@
 {
-  "name": "neon-drive-3d",
-  "version": "1.0.0",
-  "description": "A Vercel-deployable 3D driving game built with Three.js and Vite. Drive a supercar through a neon NYC-inspired city.",
+  "name": "lagos-drift",
+  "version": "2.0.0",
+  "description": "Lagos Drift — a low-poly checkpoint racer built with Three.js. Drive a real Jeep model through a city assembled from modular road pieces and textured buildings.",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
     "three": "^0.160.0"

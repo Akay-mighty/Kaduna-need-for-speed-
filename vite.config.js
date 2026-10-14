@@ -7,10 +7,8 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
     sourcemap: false,
-    minify: 'esbuild'
+    minify: 'esbuild',
+    chunkSizeWarningLimit: 6000
   },
-  server: {
-    port: 5173,
-    open: true
-  }
+  server: { port: 5173, open: true }
 });

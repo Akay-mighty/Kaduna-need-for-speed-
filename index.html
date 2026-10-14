@@ -3,142 +3,183 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#0a0a1f" />
-  <title>Neon Drive 3D — A Vercel Three.js Driving Game</title>
+  <meta name="theme-color" content="#1a8fe3" />
+  <title>Lagos Drift — Low-Poly Checkpoint Racer</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800;900&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #050514; color: #fff; font-family: 'Rajdhani', sans-serif; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #87ceeb; color: #fff; font-family: 'Outfit', sans-serif; }
     #app { position: fixed; inset: 0; }
     canvas { display: block; width: 100%; height: 100%; }
 
     /* ===== Loader ===== */
     #loader {
       position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
-      background: radial-gradient(circle at center, #1a1a3a 0%, #050514 100%);
+      background: linear-gradient(180deg, #1a8fe3 0%, #2547c0 60%, #0e1b4d 100%);
       transition: opacity .6s ease, visibility .6s ease;
     }
     #loader.hidden { opacity: 0; visibility: hidden; }
-    .loader-inner { text-align: center; }
+    .loader-inner { text-align: center; padding: 1rem; }
+    .logo-mark {
+      width: 90px; height: 90px; margin: 0 auto 1.5rem;
+      background: linear-gradient(135deg, #ffd23f, #ff6b35);
+      border-radius: 20px; display: flex; align-items: center; justify-content: center;
+      font-size: 3rem; box-shadow: 0 20px 60px rgba(255, 107, 53, .4), inset 0 -8px 0 rgba(0,0,0,.15);
+      transform: rotate(-3deg);
+    }
     .loader-inner h1 {
-      font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: clamp(2rem, 6vw, 4rem);
-      letter-spacing: .2em; background: linear-gradient(90deg, #ff2a6d, #05d9e8, #d1f7ff);
-      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-      text-shadow: 0 0 30px rgba(255, 42, 109, .4);
+      font-weight: 900; font-size: clamp(2rem, 6vw, 3.6rem); letter-spacing: -.02em;
+      text-shadow: 0 4px 30px rgba(0,0,0,.4); line-height: 1;
     }
-    .loader-inner p { margin-top: .8rem; color: #8aa0c0; letter-spacing: .3em; font-size: .9rem; text-transform: uppercase; }
-    .loader-bar { margin-top: 2rem; width: 280px; max-width: 80vw; height: 4px; background: #1a1a3a; border-radius: 4px; overflow: hidden; }
-    .loader-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #ff2a6d, #05d9e8); transition: width .3s ease; box-shadow: 0 0 12px #05d9e8; }
-    .loader-pct { margin-top: .8rem; font-family: 'Orbitron', sans-serif; font-size: .8rem; color: #05d9e8; }
+    .loader-inner .tag { font-weight: 600; font-size: .9rem; letter-spacing: .3em; text-transform: uppercase; color: rgba(255,255,255,.75); margin-top: .8rem; }
+    .loader-bar { margin: 2rem auto 0; width: 280px; max-width: 80vw; height: 6px; background: rgba(255,255,255,.15); border-radius: 4px; overflow: hidden; }
+    .loader-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #ffd23f, #ff6b35); transition: width .3s ease; box-shadow: 0 0 12px rgba(255, 210, 63, .6); }
+    .loader-pct { margin-top: 1rem; font-family: 'Space Grotesk', monospace; font-size: .85rem; color: rgba(255,255,255,.6); }
+    .loader-status { margin-top: .5rem; font-size: .8rem; color: rgba(255,255,255,.45); letter-spacing: .1em; text-transform: uppercase; }
 
-    /* ===== Car Select ===== */
-    #car-select {
-      position: fixed; inset: 0; z-index: 90; display: none; align-items: center; justify-content: center;
-      background: linear-gradient(135deg, #0a0a1f 0%, #1a0a2e 50%, #050514 100%);
-      flex-direction: column; padding: 1rem;
+    /* ===== Start Screen ===== */
+    #start {
+      position: fixed; inset: 0; z-index: 90; display: none; align-items: center; justify-content: center; flex-direction: column;
+      background: linear-gradient(180deg, rgba(26, 143, 227, .85) 0%, rgba(37, 71, 192, .9) 50%, rgba(14, 27, 77, .95) 100%);
+      backdrop-filter: blur(8px); padding: 1rem;
     }
-    #car-select.active { display: flex; }
-    .select-title { font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: clamp(1.5rem, 4vw, 2.5rem); letter-spacing: .15em; margin-bottom: .5rem; text-align: center; background: linear-gradient(90deg, #ff2a6d, #05d9e8); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-    .select-sub { color: #8aa0c0; letter-spacing: .2em; text-transform: uppercase; font-size: .8rem; margin-bottom: 2rem; text-align: center; }
-    .car-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.2rem; max-width: 900px; width: 100%; }
-    .car-card {
-      background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px;
-      padding: 1.2rem; cursor: pointer; transition: all .25s ease; position: relative; overflow: hidden;
+    #start.active { display: flex; }
+    .start-card {
+      background: rgba(10, 20, 40, .65); border: 1px solid rgba(255,255,255,.1); border-radius: 20px;
+      padding: 2rem; max-width: 540px; width: 100%; box-shadow: 0 30px 80px rgba(0,0,0,.4);
     }
-    .car-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, transparent, rgba(5,217,232,0.08)); opacity: 0; transition: opacity .25s; }
-    .car-card:hover { border-color: #05d9e8; transform: translateY(-4px); box-shadow: 0 12px 40px rgba(5,217,232,0.15); }
-    .car-card:hover::before { opacity: 1; }
-    .car-card img { width: 100%; height: 130px; object-fit: contain; filter: drop-shadow(0 10px 20px rgba(0,0,0,.6)); }
-    .car-card h3 { font-family: 'Orbitron', sans-serif; font-size: 1.1rem; margin-top: .8rem; letter-spacing: .05em; }
-    .car-card .stats { display: flex; gap: .8rem; margin-top: .6rem; font-size: .75rem; color: #8aa0c0; }
-    .car-card .stat { flex: 1; }
-    .car-card .stat-bar { height: 3px; background: #2a2a4a; border-radius: 2px; margin-top: .25rem; overflow: hidden; }
-    .car-card .stat-bar > div { height: 100%; background: linear-gradient(90deg, #ff2a6d, #05d9e8); }
-    .car-card .tag { position: absolute; top: .6rem; right: .6rem; font-size: .65rem; padding: .15rem .5rem; background: rgba(255,42,109,.2); color: #ff2a6d; border: 1px solid rgba(255,42,109,.4); border-radius: 4px; letter-spacing: .1em; text-transform: uppercase; }
+    .start-card h2 { font-size: 1.2rem; letter-spacing: .3em; color: #ffd23f; text-transform: uppercase; margin-bottom: .4rem; }
+    .start-card h1 { font-size: clamp(2.2rem, 6vw, 3rem); font-weight: 900; line-height: 1; margin-bottom: .6rem; }
+    .start-card p { color: rgba(255,255,255,.7); font-size: .95rem; line-height: 1.5; margin-bottom: 1.4rem; }
+    .controls-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .6rem; margin-bottom: 1.4rem; }
+    .control-item { background: rgba(255,255,255,.05); border-radius: 10px; padding: .6rem .8rem; display: flex; align-items: center; gap: .6rem; font-size: .85rem; }
+    .control-item kbd { display: inline-block; padding: .15rem .5rem; background: rgba(255, 210, 63, .15); border: 1px solid rgba(255, 210, 63, .4); border-radius: 5px; color: #ffd23f; font-family: 'Space Grotesk', monospace; font-size: .75rem; min-width: 28px; text-align: center; font-weight: 600; }
+    .btn-primary {
+      display: block; width: 100%; padding: 1rem; border: none; border-radius: 12px; cursor: pointer;
+      background: linear-gradient(135deg, #ffd23f, #ff6b35); color: #1a0f00;
+      font-family: 'Outfit', sans-serif; font-weight: 800; font-size: 1.1rem; letter-spacing: .05em;
+      box-shadow: 0 12px 30px rgba(255, 107, 53, .35); transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 18px 40px rgba(255, 107, 53, .5); }
+    .btn-primary:active { transform: translateY(0); }
+    .best-time { margin-top: 1rem; padding: .8rem; background: rgba(255, 210, 63, .08); border: 1px solid rgba(255, 210, 63, .2); border-radius: 10px; text-align: center; }
+    .best-time .label { font-size: .7rem; letter-spacing: .3em; color: #ffd23f; text-transform: uppercase; }
+    .best-time .value { font-family: 'Space Grotesk', monospace; font-size: 1.6rem; font-weight: 700; margin-top: .2rem; }
 
     /* ===== HUD ===== */
-    #hud { position: fixed; inset: 0; z-index: 80; pointer-events: none; display: none; }
+    #hud { position: fixed; inset: 0; z-index: 80; pointer-events: none; display: none; font-family: 'Outfit', sans-serif; }
     #hud.active { display: block; }
 
-    .hud-corner {
-      position: absolute; padding: 1rem 1.2rem; font-family: 'Orbitron', sans-serif;
-      background: linear-gradient(135deg, rgba(10,10,31,.85), rgba(10,10,31,.4));
-      border: 1px solid rgba(5,217,232,.3); border-radius: 8px; backdrop-filter: blur(6px);
-      box-shadow: 0 0 20px rgba(5,217,232,.1), inset 0 0 20px rgba(5,217,232,.05);
+    .hud-card {
+      position: absolute; padding: .8rem 1rem;
+      background: rgba(8, 18, 36, .78); border: 1px solid rgba(255,255,255,.12); border-radius: 10px;
+      backdrop-filter: blur(10px); box-shadow: 0 8px 24px rgba(0,0,0,.25);
     }
     .hud-tl { top: 1rem; left: 1rem; }
     .hud-tr { top: 1rem; right: 1rem; text-align: right; }
     .hud-bl { bottom: 1rem; left: 1rem; }
     .hud-br { bottom: 1rem; right: 1rem; text-align: right; }
 
-    .hud-label { font-size: .7rem; letter-spacing: .2em; color: #05d9e8; text-transform: uppercase; }
-    .hud-value { font-size: 1.4rem; font-weight: 800; color: #fff; text-shadow: 0 0 10px rgba(5,217,232,.6); }
-    .hud-value.big { font-size: 2.2rem; }
-    .hud-sub { font-size: .75rem; color: #8aa0c0; letter-spacing: .1em; }
+    .hud-label { font-size: .65rem; letter-spacing: .25em; color: rgba(255,255,255,.55); text-transform: uppercase; font-weight: 600; }
+    .hud-value { font-family: 'Space Grotesk', monospace; font-size: 1.6rem; font-weight: 700; color: #fff; line-height: 1.1; margin-top: .15rem; }
+    .hud-value.big { font-size: 2.4rem; font-weight: 800; }
+    .hud-value.accent { color: #ffd23f; }
+    .hud-value.danger { color: #ff5959; }
+    .hud-sub { font-size: .75rem; color: rgba(255,255,255,.5); margin-top: .15rem; font-family: 'Space Grotesk', monospace; }
 
-    .speedo { display: flex; align-items: baseline; gap: .3rem; }
-    .speedo .unit { font-size: .9rem; color: #05d9e8; }
+    .speed-display { display: flex; align-items: baseline; gap: .3rem; }
+    .speed-display .unit { font-size: .9rem; color: rgba(255,255,255,.5); font-weight: 600; }
 
+    /* ===== Checkpoint arrow ===== */
+    #cp-arrow {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 75; pointer-events: none;
+      width: 70px; height: 70px; opacity: .85;
+    }
+    #cp-arrow svg { width: 100%; height: 100%; filter: drop-shadow(0 0 12px rgba(255, 210, 63, .8)); }
+    #cp-distance {
+      position: fixed; top: calc(50% + 50px); left: 50%; transform: translateX(-50%); z-index: 75;
+      font-family: 'Space Grotesk', monospace; font-size: .85rem; color: #ffd23f;
+      text-shadow: 0 2px 8px rgba(0,0,0,.8); pointer-events: none;
+    }
+
+    /* ===== Minimap ===== */
+    .minimap-wrap {
+      position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); z-index: 78; pointer-events: none;
+    }
     .minimap {
-      position: absolute; bottom: 1rem; left: 50%; transform: translateX(-50%);
-      width: 140px; height: 140px; border-radius: 50%;
-      background: radial-gradient(circle, rgba(10,10,31,.85) 0%, rgba(10,10,31,.4) 70%, transparent 100%);
-      border: 2px solid rgba(5,217,232,.4); box-shadow: 0 0 30px rgba(5,217,232,.15), inset 0 0 20px rgba(5,217,232,.1);
+      width: 150px; height: 150px; border-radius: 50%;
+      background: rgba(8, 18, 36, .75); border: 2px solid rgba(255,255,255,.2);
+      box-shadow: 0 8px 24px rgba(0,0,0,.4), inset 0 0 20px rgba(255, 210, 63, .08);
       overflow: hidden;
     }
-    .minimap canvas { width: 100%; height: 100%; }
-    .minimap-label { position: absolute; top: -22px; left: 50%; transform: translateX(-50%); font-family: 'Orbitron', sans-serif; font-size: .65rem; letter-spacing: .3em; color: #05d9e8; }
-
-    /* ===== Mission banner ===== */
-    #mission {
-      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 85;
-      pointer-events: none; opacity: 0; transition: opacity .4s ease;
-      text-align: center; font-family: 'Orbitron', sans-serif;
+    .minimap canvas { width: 100%; height: 100%; display: block; }
+    .minimap-tag {
+      position: absolute; top: -22px; left: 50%; transform: translateX(-50%);
+      font-size: .65rem; letter-spacing: .3em; color: #ffd23f; text-transform: uppercase; font-weight: 600;
     }
-    #mission.show { opacity: 1; }
-    #mission .m-tag { font-size: .75rem; letter-spacing: .4em; color: #ff2a6d; text-transform: uppercase; }
-    #mission .m-title { font-size: clamp(1.4rem, 4vw, 2.4rem); font-weight: 900; margin-top: .4rem; color: #fff; text-shadow: 0 0 20px rgba(5,217,232,.6); }
 
-    /* ===== Controls hint ===== */
-    #controls-hint {
-      position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); z-index: 70;
-      background: rgba(10,10,31,.7); border: 1px solid rgba(255,255,255,.1); border-radius: 6px;
-      padding: .5rem 1rem; font-size: .75rem; letter-spacing: .1em; color: #8aa0c0;
-      backdrop-filter: blur(6px); pointer-events: none; opacity: .8; display: none;
+    /* ===== Big banner ===== */
+    #banner {
+      position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%); z-index: 85; pointer-events: none;
+      text-align: center; opacity: 0; transition: opacity .4s ease, transform .4s ease;
     }
-    #controls-hint.active { display: block; }
-    #controls-hint kbd { display: inline-block; padding: .1rem .4rem; margin: 0 .15rem; background: #1a1a3a; border: 1px solid rgba(5,217,232,.3); border-radius: 3px; color: #05d9e8; font-family: 'Orbitron', sans-serif; font-size: .7rem; }
+    #banner.show { opacity: 1; }
+    #banner .b-tag { font-size: .75rem; letter-spacing: .4em; color: #ffd23f; text-transform: uppercase; font-weight: 600; }
+    #banner .b-title { font-size: clamp(1.8rem, 5vw, 3rem); font-weight: 900; margin-top: .4rem; text-shadow: 0 4px 20px rgba(0,0,0,.6); }
+    #banner .b-sub { font-size: .9rem; color: rgba(255,255,255,.7); margin-top: .4rem; font-family: 'Space Grotesk', monospace; }
 
-    /* Mobile touch controls */
-    #touch { position: fixed; inset: 0; z-index: 75; pointer-events: none; display: none; }
+    /* ===== End screen ===== */
+    #end {
+      position: fixed; inset: 0; z-index: 95; display: none; align-items: center; justify-content: center; flex-direction: column;
+      background: rgba(8, 18, 36, .85); backdrop-filter: blur(10px); padding: 1rem;
+    }
+    #end.active { display: flex; }
+    .end-card { background: rgba(10, 20, 40, .8); border: 1px solid rgba(255,255,255,.1); border-radius: 20px; padding: 2.2rem; max-width: 480px; width: 100%; text-align: center; box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+    .end-card h2 { font-size: .85rem; letter-spacing: .3em; color: #ffd23f; text-transform: uppercase; margin-bottom: .5rem; }
+    .end-card h1 { font-size: clamp(2rem, 6vw, 2.8rem); font-weight: 900; margin-bottom: 1.4rem; }
+    .lap-list { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 1.4rem; }
+    .lap-row { display: flex; justify-content: space-between; padding: .6rem 1rem; background: rgba(255,255,255,.05); border-radius: 8px; font-family: 'Space Grotesk', monospace; font-size: 1rem; }
+    .lap-row.best { background: rgba(255, 210, 63, .15); border: 1px solid rgba(255, 210, 63, .4); color: #ffd23f; }
+    .lap-row .lap-name { color: rgba(255,255,255,.6); font-size: .85rem; }
+    .lap-row .lap-time { font-weight: 700; }
+    .end-actions { display: flex; gap: .6rem; }
+    .end-actions button { flex: 1; }
+    .btn-ghost {
+      padding: 1rem; border: 1px solid rgba(255,255,255,.2); border-radius: 12px; cursor: pointer;
+      background: rgba(255,255,255,.05); color: #fff; font-family: 'Outfit', sans-serif; font-weight: 600;
+      font-size: .95rem; transition: background .15s ease;
+    }
+    .btn-ghost:hover { background: rgba(255,255,255,.1); }
+
+    /* ===== Mobile touch ===== */
+    #touch { position: fixed; inset: 0; z-index: 70; pointer-events: none; display: none; }
     #touch.active { display: block; }
     .touch-btn {
-      position: absolute; pointer-events: auto;
-      width: 70px; height: 70px; border-radius: 50%;
-      background: rgba(5,217,232,.15); border: 2px solid rgba(5,217,232,.4);
+      position: absolute; pointer-events: auto; width: 76px; height: 76px; border-radius: 50%;
+      background: rgba(8, 18, 36, .5); border: 2px solid rgba(255, 210, 63, .5);
       display: flex; align-items: center; justify-content: center;
-      color: #05d9e8; font-size: 1.6rem; font-family: 'Orbitron', sans-serif;
-      backdrop-filter: blur(6px); user-select: none;
+      color: #ffd23f; font-size: 1.8rem; font-weight: 700; backdrop-filter: blur(6px);
     }
-    .touch-btn:active { background: rgba(5,217,232,.35); }
-    #btn-left { bottom: 5rem; left: 1.5rem; }
-    #btn-right { bottom: 5rem; left: 6rem; }
-    #btn-gas { bottom: 5rem; right: 1.5rem; }
-    #btn-brake { bottom: 5rem; right: 6rem; }
+    .touch-btn:active { background: rgba(255, 210, 63, .35); transform: scale(.92); }
+    #btn-left  { bottom: 5.5rem; left: 1.5rem; }
+    #btn-right { bottom: 5.5rem; left: 5rem; }
+    #btn-gas   { bottom: 5.5rem; right: 1.5rem; }
+    #btn-brake { bottom: 5.5rem; right: 5rem; }
+    #btn-drift {
+      bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+      width: 60px; height: 60px; background: rgba(255, 107, 53, .4); border-color: #ff6b35; color: #ff6b35; font-size: 1.2rem;
+    }
 
     @media (max-width: 768px) {
       #touch.active { display: block; }
-      .hud-value.big { font-size: 1.6rem; }
-      .minimap { width: 100px; height: 100px; }
+      .hud-card { padding: .6rem .8rem; }
+      .hud-value { font-size: 1.3rem; }
+      .hud-value.big { font-size: 1.9rem; }
+      .minimap { width: 110px; height: 110px; }
     }
-
-    .footer-tag {
-      position: fixed; bottom: .3rem; right: .5rem; z-index: 60; font-size: .6rem;
-      color: rgba(255,255,255,.3); letter-spacing: .2em; font-family: 'Orbitron', sans-serif;
-      pointer-events: none;
-    }
+    .credit { position: fixed; bottom: .4rem; right: .6rem; z-index: 60; font-size: .65rem; color: rgba(255,255,255,.3); letter-spacing: .15em; pointer-events: none; font-family: 'Space Grotesk', monospace; }
   </style>
 </head>
 <body>
@@ -147,68 +188,103 @@
   <!-- Loader -->
   <div id="loader">
     <div class="loader-inner">
-      <h1>NEON DRIVE 3D</h1>
-      <p>Loading city grid…</p>
+      <div class="logo-mark">🚙</div>
+      <h1>LAGOS DRIFT</h1>
+      <div class="tag">Low-Poly Checkpoint Racer</div>
       <div class="loader-bar"><div class="loader-bar-fill" id="loader-fill"></div></div>
       <div class="loader-pct" id="loader-pct">0%</div>
+      <div class="loader-status" id="loader-status">Initializing…</div>
     </div>
   </div>
 
-  <!-- Car Select -->
-  <div id="car-select">
-    <div class="select-title">CHOOSE YOUR RIDE</div>
-    <div class="select-sub">Three legends. One neon city. Pick one.</div>
-    <div class="car-grid" id="car-grid"></div>
+  <!-- Start -->
+  <div id="start">
+    <div class="start-card">
+      <h2>Race Brief</h2>
+      <h1>LAGOS DRIFT</h1>
+      <p>Drive the Jeep through 3 laps of a low-poly Lagos city grid. Hit every checkpoint in order — gold rings in the road — to bank lap times. Beat your best time.</p>
+      <div class="controls-grid">
+        <div class="control-item"><kbd>W</kbd><span>Accelerate</span></div>
+        <div class="control-item"><kbd>S</kbd><span>Brake / Reverse</span></div>
+        <div class="control-item"><kbd>A</kbd><span>Steer Left</span></div>
+        <div class="control-item"><kbd>D</kbd><span>Steer Right</span></div>
+        <div class="control-item"><kbd>␣</kbd><span>Drift</span></div>
+        <div class="control-item"><kbd>C</kbd><span>Camera</span></div>
+      </div>
+      <div class="best-time" id="best-time-display" style="display:none">
+        <div class="label">Personal Best Lap</div>
+        <div class="value" id="best-time-value">--:--.---</div>
+      </div>
+      <button class="btn-primary" id="start-race" style="margin-top:1.4rem">Start Race</button>
+    </div>
   </div>
 
   <!-- HUD -->
   <div id="hud">
-    <div class="hud-corner hud-tl">
-      <div class="hud-label">Mission</div>
-      <div class="hud-value" style="font-size:1rem" id="mission-name">Free Drive</div>
-      <div class="hud-sub" id="mission-sub">Explore the neon grid</div>
+    <div class="hud-card hud-tl">
+      <div class="hud-label">Lap</div>
+      <div class="hud-value"><span id="lap-current">1</span>/<span id="lap-total">3</span></div>
+      <div class="hud-sub" id="lap-time-current">00:00.000</div>
     </div>
-    <div class="hud-corner hud-tr">
-      <div class="hud-label">Score</div>
-      <div class="hud-value" id="score">0</div>
-      <div class="hud-sub">Coins: <span id="coins">0</span> / <span id="coins-total">0</span></div>
+    <div class="hud-card hud-tr">
+      <div class="hud-label">Last Lap</div>
+      <div class="hud-value" id="lap-time-last">--:--.---</div>
+      <div class="hud-sub" id="lap-time-best">Best: --:--.---</div>
     </div>
-    <div class="hud-corner hud-bl">
-      <div class="hud-label">Gear</div>
-      <div class="hud-value" id="gear">N</div>
-      <div class="hud-sub" id="rpm">0 RPM</div>
-    </div>
-    <div class="hud-corner hud-br">
+    <div class="hud-card hud-bl">
       <div class="hud-label">Speed</div>
-      <div class="hud-value big speedo"><span id="speed">0</span><span class="unit">KM/H</span></div>
-      <div class="hud-sub" id="distance">0 m driven</div>
+      <div class="hud-value big speed-display"><span id="speed">0</span><span class="unit">KM/H</span></div>
+      <div class="hud-sub" id="gear-display">D · 0 RPM</div>
     </div>
-    <div class="minimap">
-      <div class="minimap-label">RADAR</div>
-      <canvas id="minimap-canvas" width="140" height="140"></canvas>
+    <div class="hud-card hud-br">
+      <div class="hud-label">Checkpoint</div>
+      <div class="hud-value accent"><span id="cp-current">1</span>/<span id="cp-total">8</span></div>
+      <div class="hud-sub" id="drift-display">DRIFT 0</div>
+    </div>
+    <div class="minimap-wrap">
+      <div class="minimap-tag">RADAR</div>
+      <div class="minimap"><canvas id="minimap-canvas" width="300" height="300"></canvas></div>
     </div>
   </div>
 
-  <!-- Mission banner -->
-  <div id="mission">
-    <div class="m-tag" id="mission-tag">Objective</div>
-    <div class="m-title" id="mission-title">— —</div>
+  <!-- Checkpoint arrow + distance -->
+  <div id="cp-arrow">
+    <svg viewBox="0 0 70 70" xmlns="http://www.w3.org/2000/svg">
+      <path id="cp-arrow-path" d="M35 5 L55 50 L35 38 L15 50 Z" fill="#ffd23f" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+    </svg>
+  </div>
+  <div id="cp-distance">0 m</div>
+
+  <!-- Big banner -->
+  <div id="banner">
+    <div class="b-tag" id="banner-tag">—</div>
+    <div class="b-title" id="banner-title">—</div>
+    <div class="b-sub" id="banner-sub"></div>
   </div>
 
-  <!-- Controls hint -->
-  <div id="controls-hint">
-    <kbd>W</kbd>/<kbd>↑</kbd> Gas &nbsp; <kbd>S</kbd>/<kbd>↓</kbd> Brake &nbsp; <kbd>A</kbd>/<kbd>←</kbd> Left &nbsp; <kbd>D</kbd>/<kbd>→</kbd> Right &nbsp; <kbd>SPACE</kbd> Drift &nbsp; <kbd>C</kbd> Camera
+  <!-- End screen -->
+  <div id="end">
+    <div class="end-card">
+      <h2>Race Complete</h2>
+      <h1 id="end-title">Finished!</h1>
+      <div class="lap-list" id="lap-list"></div>
+      <div class="end-actions">
+        <button class="btn-ghost" id="end-restart">Race Again</button>
+        <button class="btn-primary" id="end-menu">Back to Menu</button>
+      </div>
+    </div>
   </div>
 
-  <!-- Touch controls (mobile) -->
+  <!-- Touch -->
   <div id="touch">
     <div class="touch-btn" id="btn-left">◀</div>
     <div class="touch-btn" id="btn-right">▶</div>
-    <div class="touch-btn" id="btn-gas">⛽</div>
-    <div class="touch-btn" id="btn-brake">■</div>
+    <div class="touch-btn" id="btn-gas">GO</div>
+    <div class="touch-btn" id="btn-brake">BRK</div>
+    <div class="touch-btn" id="btn-drift">DRIFT</div>
   </div>
 
-  <div class="footer-tag">NEON DRIVE 3D · VERCEL · THREE.JS</div>
+  <div class="credit">LAGOS DRIFT · THREE.JS · VERCEL</div>
 
   <script type="module" src="/src/main.js"></script>
 </body>
