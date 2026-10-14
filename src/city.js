@@ -377,12 +377,15 @@ export class City {
         this.scene.add(seg);
         this.barriers.push(seg);
 
-        // Collider (small AABB around each segment)
+        // Collider: use a CIRCLE (orientation-independent) instead of an
+        // axis-aligned box. The barrier mesh is rotated to follow the track,
+        // so an AABB would be incorrectly oriented on curves and cause false
+        // collisions that trap the player. A circle of radius len/2 + bT/2
+        // approximates the segment well for collision purposes.
         this.colliders.push({
-          x: mx, z: mz, half: Math.max(bT, len) / 2 + 0.5,
-          minX: mx - bT, maxX: mx + bT,
-          minZ: mz - (len + 0.1) / 2, maxZ: mz + (len + 0.1) / 2,
-          // We'll use the segment center + half-width as the actual collider; collision resolution below is approximate
+          type: 'circle',
+          x: mx, z: mz,
+          r: len / 2 + bT / 2 + 0.3,   // segment length half + barrier thickness half + small pad
         });
       }
     }
@@ -560,6 +563,7 @@ export class City {
 
     // Collider: AABB covering the building footprint
     this.colliders.push({
+      type: 'box',
       x, z, half: Math.max(w, d) / 2 + 0.3,
       minX: x - w / 2 - 0.3, maxX: x + w / 2 + 0.3,
       minZ: z - d / 2 - 0.3, maxZ: z + d / 2 + 0.3,
@@ -770,34 +774,53 @@ export class City {
 
   // ===== Collision resolution =====
   // Returns true if the player penetrated any collider this frame; mutates pos to push out.
+  // Handles two collider types:
+  //   - 'box': axis-aligned bounding box (buildings, taxis)
+  //   - 'circle': circle at (x, z) with radius r (barriers — orientation-independent)
   resolveCollision(pos, radius = 1.5) {
     let hit = false;
     let hitNormal = null;
     for (const c of this.colliders) {
-      // Find closest point on the AABB to (pos.x, pos.z)
-      const cx = Math.max(c.minX, Math.min(c.maxX, pos.x));
-      const cz = Math.max(c.minZ, Math.min(c.maxZ, pos.z));
-      const dx = pos.x - cx;
-      const dz = pos.z - cz;
-      const distSq = dx * dx + dz * dz;
-      if (distSq < radius * radius) {
-        const dist = Math.sqrt(distSq) || 0.0001;
-        const push = (radius - dist) / dist;
-        if (dist < 0.0001) {
-          // Player center is inside the box — push out along the smallest penetration axis
-          const penX = Math.min(pos.x - c.minX, c.maxX - pos.x);
-          const penZ = Math.min(pos.z - c.minZ, c.maxZ - pos.z);
-          if (penX < penZ) {
-            pos.x += (pos.x < c.x ? -1 : 1) * (penX + radius);
-          } else {
-            pos.z += (pos.z < c.z ? -1 : 1) * (penZ + radius);
-          }
-        } else {
+      if (c.type === 'circle') {
+        // Circle-vs-circle: distance from player center to collider center
+        const dx = pos.x - c.x;
+        const dz = pos.z - c.z;
+        const distSq = dx * dx + dz * dz;
+        const sumR = radius + c.r;
+        if (distSq < sumR * sumR) {
+          const dist = Math.sqrt(distSq) || 0.0001;
+          const push = (sumR - dist) / dist;
           pos.x += dx * push;
           pos.z += dz * push;
+          hit = true;
+          hitNormal = new THREE.Vector2(dx, dz).normalize();
         }
-        hit = true;
-        hitNormal = new THREE.Vector2(dx, dz).normalize();
+      } else {
+        // Box (AABB) — closest point on box to player
+        const cx = Math.max(c.minX, Math.min(c.maxX, pos.x));
+        const cz = Math.max(c.minZ, Math.min(c.maxZ, pos.z));
+        const dx = pos.x - cx;
+        const dz = pos.z - cz;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < radius * radius) {
+          const dist = Math.sqrt(distSq) || 0.0001;
+          const push = (radius - dist) / dist;
+          if (dist < 0.0001) {
+            // Player center is inside the box — push out along the smallest penetration axis
+            const penX = Math.min(pos.x - c.minX, c.maxX - pos.x);
+            const penZ = Math.min(pos.z - c.minZ, c.maxZ - pos.z);
+            if (penX < penZ) {
+              pos.x += (pos.x < c.x ? -1 : 1) * (penX + radius);
+            } else {
+              pos.z += (pos.z < c.z ? -1 : 1) * (penZ + radius);
+            }
+          } else {
+            pos.x += dx * push;
+            pos.z += dz * push;
+          }
+          hit = true;
+          hitNormal = new THREE.Vector2(dx, dz).normalize();
+        }
       }
     }
     return { hit, normal: hitNormal };

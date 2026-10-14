@@ -77,6 +77,33 @@ document.getElementById('end-menu').addEventListener('click', () => {
   if (game.ghost) game.ghost.stopPlayback();
 });
 
+// Settings "Back to Menu" button → return to start screen (regardless of in-race state)
+// The SettingsUI.onClose callback is set inside game._setupSettings() but
+// we override it here to handle the navigation back to the menu.
+function setupSettingsCloseNav() {
+  if (!game.settingsUI) {
+    setTimeout(setupSettingsCloseNav, 100);
+    return;
+  }
+  game.settingsUI.onClose = (target) => {
+    if (target === 'menu') {
+      game.started = false;
+      document.getElementById('hud').classList.remove('active');
+      document.getElementById('touch').classList.remove('active');
+      document.getElementById('boost-bar').classList.remove('active');
+      document.getElementById('boost-label').classList.remove('active');
+      document.getElementById('cp-arrow').style.display = 'block';
+      document.getElementById('cp-distance').style.display = 'block';
+      endEl.classList.remove('active');
+      startEl.classList.add('active');
+      if (game.rivals) game.rivals.reset();
+      if (game.ghost) game.ghost.stopPlayback();
+    }
+    // 'game' = back to game, just close the overlay (no-op since the loop already unpauses)
+  };
+}
+setupSettingsCloseNav();
+
 function formatTimeLocal(seconds) {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);

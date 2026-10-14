@@ -1,13 +1,14 @@
 // ============================================================
 // camera.js — chase camera with ground-clamp + collision-aware offset
 //
-// FIXES:
-//   - Camera Y is always clamped above the road (y >= 2)
-//   - Camera never goes below the player (so it never shows the underside)
-//   - Look-at target is the player + forward bias, clamped to y >= 1
-//   - Smooth follow with frame-rate-independent lerp
+// v5 improvements:
+//   - Default distance 14 (was 10) and height 6 (was 5) — not too close
+//   - Distance is configurable via Settings (cameraDistance slider 5-25)
+//   - Smoother follow (slower lerp for less nausea on mobile)
+//   - Y is always clamped above the road (y >= 2.5)
+//   - Look-at target is the player + forward bias, clamped to y >= 0.5
 //   - FOV speed-kick but capped so it doesn't fisheye
-//   - No "cinematic" mode that could swing into the void
+//   - 3 modes: chase / hood / high
 // ============================================================
 import * as THREE from 'three';
 
@@ -17,10 +18,15 @@ export class ChaseCamera {
   constructor(camera) {
     this.camera = camera;
     this.mode = 0;
-    this.curPos = new THREE.Vector3(0, 8, -12);
+    this.curPos = new THREE.Vector3(0, 8, -14);
     this.curLook = new THREE.Vector3(0, 1, 0);
     this.fov = 65;
+    this.distance = 14;    // configurable via Settings
+    this.height = 6;       // configurable via Settings
   }
+
+  setDistance(d) { this.distance = Math.max(5, Math.min(25, d)); }
+  setHeight(h)   { this.height = Math.max(3, Math.min(12, h)); }
 
   cycle() {
     this.mode = (this.mode + 1) % MODES.length;
@@ -34,15 +40,15 @@ export class ChaseCamera {
     let offset, lookHeight;
     if (MODES[this.mode] === 'chase') {
       // Standard third-person chase cam: behind + above
-      offset = fwd.clone().multiplyScalar(-10).add(new THREE.Vector3(0, 5, 0));
-      lookHeight = 1.2;
+      offset = fwd.clone().multiplyScalar(-this.distance).add(new THREE.Vector3(0, this.height, 0));
+      lookHeight = 1.4;
     } else if (MODES[this.mode] === 'hood') {
       // Close to the hood, looking forward
-      offset = fwd.clone().multiplyScalar(-0.5).add(new THREE.Vector3(0, 2.2, 0));
-      lookHeight = 2.0;
+      offset = fwd.clone().multiplyScalar(-0.5).add(new THREE.Vector3(0, 2.4, 0));
+      lookHeight = 2.2;
     } else {
-      // High angle — like a slightly-top-down view, good for seeing the track
-      offset = fwd.clone().multiplyScalar(-8).add(new THREE.Vector3(0, 12, 0));
+      // High angle — slightly top-down, good for seeing the track
+      offset = fwd.clone().multiplyScalar(-this.distance * 0.6).add(new THREE.Vector3(0, this.height * 2, 0));
       lookHeight = 0.8;
     }
 
@@ -58,16 +64,16 @@ export class ChaseCamera {
     // Clamp look-at target above ground
     look.y = Math.max(look.y, 0.5);
 
-    // Smooth follow (frame-rate independent)
-    const lerp = 1 - Math.pow(0.001, dt);
+    // Smooth follow (slower lerp = smoother but slightly less responsive)
+    const lerp = 1 - Math.pow(0.003, dt);   // was 0.001 — slightly snappier
     this.curPos.lerp(ideal, lerp);
     this.camera.position.copy(this.curPos);
     this.curLook.lerp(look, lerp);
     this.camera.lookAt(this.curLook);
 
-    // FOV kick with speed (capped)
-    const speedFactor = Math.min(1, Math.abs(player.speed) / 50);
-    const targetFov = 65 + speedFactor * 8;
+    // FOV kick with speed (capped to avoid fisheye)
+    const speedFactor = Math.min(1, Math.abs(player.speed) / 60);
+    const targetFov = 65 + speedFactor * 10;
     this.fov += (targetFov - this.fov) * Math.min(1, dt * 4);
     this.camera.fov = this.fov;
     this.camera.updateProjectionMatrix();

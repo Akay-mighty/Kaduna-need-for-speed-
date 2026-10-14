@@ -17,6 +17,7 @@ import { Race, formatTime, TOTAL_LAPS } from './race.js';
 import { Rivals } from './rivals.js';
 import { Ghost } from './ghost.js';
 import { BoostPads } from './boostpads.js';
+import { Settings, SettingsUI } from './settings.js';
 
 // Day/night cycle: 4 keyframes — dawn, noon, dusk, midnight
 const TOD_KEYFRAMES = [
@@ -66,6 +67,15 @@ export class Game {
     this.boostPads = null;
     this.tod = 0.25;   // start at "DAY"
     this.todSpeed = 1; // 1 = normal cycle speed
+
+    // v5: settings + FPS
+    this.settings = new Settings();
+    this.settingsUI = null;
+    this.fpsCounter = document.getElementById('fps-counter');
+    this._fpsFrames = 0;
+    this._fpsLastTime = performance.now();
+    this._fps = 60;
+    this.envMap = null;
   }
 
   async init(onProgress) {
@@ -83,7 +93,7 @@ export class Game {
     const canvas = document.createElement('canvas');
     document.getElementById('app').appendChild(canvas);
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this._applyGraphicsQuality();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -126,10 +136,19 @@ export class Game {
     this.city = new City(this.scene);
     await this.city.loadAll((pct, status) => onProgress && onProgress(pct, status));
 
+    // ===== Environment map (for PBR material reflections — makes the Cybertruck's
+    // stainless steel actually look like metal instead of black) =====
+    this._buildEnvMap();
+
     // ===== Player =====
     this.player = new Player(this.scene);
     await this.player.load();
     if (onProgress) onProgress(100, 'Ready');
+
+    // ===== Apply settings to player + audio =====
+    this.player.setSteerSensitivity(this.settings.get('steerSensitivity'));
+    this.audio.setSoundEnabled(this.settings.get('soundEnabled'));
+    this.audio.setSoundVolume(this.settings.get('soundVolume'));
 
     // ===== Initialize v4 systems =====
     this.rivals = new Rivals(this.scene, this.city, this.player.body);
@@ -149,17 +168,137 @@ export class Game {
     this._refreshBestTime();
     this._refreshGhostBadge();
 
-    // ===== Camera =====
+    // ===== Camera (with distance from Settings) =====
     this.cam = new ChaseCamera(this.camera);
+    this.cam.setDistance(this.settings.get('cameraDistance'));
     const fwd = this.player.getForward();
     this.cam.curPos.copy(this.player.pos).addScaledVector(fwd, -10).add(new THREE.Vector3(0, 5, 0));
     this.cam.curLook.copy(this.player.pos).add(new THREE.Vector3(0, 1.2, 0));
 
     window.addEventListener('resize', () => this._onResize());
 
+    // ===== Wire up settings UI + apply settings on change =====
+    this._setupSettings();
+
     this.modelsLoaded = true;
     this._loop = this._loop.bind(this);
     requestAnimationFrame(this._loop);
+  }
+
+  // ===== Apply graphics quality from Settings =====
+  _applyGraphicsQuality() {
+    if (!this.renderer) return;
+    const q = this.settings.get('graphicsQuality');
+    if (q === 'low') {
+      this.renderer.setPixelRatio(1);
+      this.renderer.shadowMap.enabled = false;
+      if (this.sun) this.sun.castShadow = false;
+    } else if (q === 'medium') {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+      this.renderer.shadowMap.enabled = true;
+      if (this.sun) {
+        this.sun.castShadow = true;
+        this.sun.shadow.mapSize.set(1024, 1024);
+      }
+    } else { // high
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      this.renderer.shadowMap.enabled = true;
+      if (this.sun) {
+        this.sun.castShadow = true;
+        this.sun.shadow.mapSize.set(2048, 2048);
+      }
+    }
+  }
+
+  // ===== Build an environment map for PBR material reflections =====
+  // Uses PMREMGenerator on the scene's gradient sky. The result is a
+  // pre-filtered env map that gives metallic surfaces (Cybertruck stainless
+  // steel, glass, etc.) something to reflect — fixes the "black car" issue.
+  _buildEnvMap() {
+    try {
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      // Render the existing sky shader into a 256x256 cube target, then prefilter
+      pmrem.compileEquirectangularShader();
+      // Use the sky mesh as the source — render it as an equirectangular texture
+      const tempScene = new THREE.Scene();
+      // Add a gradient backdrop that matches our sky colors
+      const skyGeo = new THREE.SphereGeometry(100, 32, 16);
+      const skyMat = new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        uniforms: {
+          topColor:    { value: new THREE.Color(0x2a6fc4) },
+          midColor:    { value: new THREE.Color(0x9ec8e8) },
+          bottomColor: { value: new THREE.Color(0xf0e0c0) },
+        },
+        vertexShader: `
+          varying vec3 vWorldPos;
+          void main() {
+            vWorldPos = position;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          varying vec3 vWorldPos;
+          uniform vec3 topColor;
+          uniform vec3 midColor;
+          uniform vec3 bottomColor;
+          void main() {
+            float h = normalize(vWorldPos).y;
+            vec3 col;
+            if (h > 0.0) {
+              col = mix(midColor, topColor, smoothstep(0.0, 0.6, h));
+            } else {
+              col = mix(midColor, bottomColor, smoothstep(0.0, -0.25, h));
+            }
+            gl_FragColor = vec4(col, 1.0);
+          }
+        `
+      });
+      const tempSky = new THREE.Mesh(skyGeo, skyMat);
+      tempScene.add(tempSky);
+      const rt = pmrem.fromScene(tempScene, 0, 0.1, 100);
+      this.envMap = rt.texture;
+      this.scene.environment = this.envMap;
+      // Cleanup
+      tempSky.geometry.dispose();
+      skyMat.dispose();
+      pmrem.dispose();
+    } catch (e) {
+      console.warn('Env map build failed, materials will be less reflective', e);
+    }
+  }
+
+  // ===== Set up settings UI + wire listeners =====
+  _setupSettings() {
+    this.settingsUI = new SettingsUI(this.settings);
+    // Open settings button
+    document.getElementById('settings-btn-open').addEventListener('click', () => {
+      this.settingsUI.show();
+    });
+
+    // React to setting changes
+    this.settings.onChange((key, value) => {
+      if (key === 'graphicsQuality' || key === 'reset') {
+        this._applyGraphicsQuality();
+      }
+      if (key === 'steerSensitivity' || key === 'reset') {
+        if (this.player) this.player.setSteerSensitivity(this.settings.get('steerSensitivity'));
+      }
+      if (key === 'cameraDistance' || key === 'reset') {
+        if (this.cam) this.cam.setDistance(this.settings.get('cameraDistance'));
+      }
+      if (key === 'soundEnabled' || key === 'soundVolume' || key === 'reset') {
+        this.audio.setSoundEnabled(this.settings.get('soundEnabled'));
+        this.audio.setSoundVolume(this.settings.get('soundVolume'));
+      }
+      if (key === 'showFPS' || key === 'reset') {
+        const show = this.settings.get('showFPS');
+        this.fpsCounter.classList.toggle('active', show);
+      }
+    });
+
+    // Initial FPS visibility
+    this.fpsCounter.classList.toggle('active', this.settings.get('showFPS'));
   }
 
   _buildSky() {
@@ -383,6 +522,23 @@ export class Game {
     const dt = Math.min(0.05, this.clock.getDelta());
     const t = this.clock.elapsedTime;
     const now = performance.now();
+
+    // ===== FPS counter =====
+    this._fpsFrames++;
+    if (now - this._fpsLastTime >= 500) {
+      this._fps = Math.round((this._fpsFrames * 1000) / (now - this._fpsLastTime));
+      this._fpsFrames = 0;
+      this._fpsLastTime = now;
+      if (this.fpsCounter) this.fpsCounter.textContent = `${this._fps} FPS`;
+    }
+
+    // ===== Pause game updates when settings is open =====
+    const settingsOpen = this.settingsUI && this.settingsUI.isVisible();
+    if (settingsOpen) {
+      // Still render the scene so it doesn't freeze visually, but don't update game state
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
 
     // Camera mode toggle (edge-triggered)
     if (this.input.camera && !this._cKeyHeld && this.cam) {

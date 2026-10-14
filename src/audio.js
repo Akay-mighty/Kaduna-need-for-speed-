@@ -1,12 +1,26 @@
 // ============================================================
-// audio.js — procedural engine + drift sound via WebAudio.
-// No external samples — everything synthesized.
+// audio.js — procedural engine + drift sound via WebAudio
+//
+// v5: master volume control (for Settings)
+//   - soundEnabled: bool — gate all sound effects
+//   - soundVolume: 0..1 — master gain multiplier
 // ============================================================
 export class EngineAudio {
   constructor() {
     this.ctx = null;
-    this.enabled = false;
     this.started = false;
+    this._built = false;
+    this.soundEnabled = true;
+    this.soundVolume = 0.7;
+  }
+
+  setSoundEnabled(on) { this.soundEnabled = on; this._applyMaster(); }
+  setSoundVolume(v)   { this.soundVolume = v;  this._applyMaster(); }
+
+  _applyMaster() {
+    if (!this.masterGain) return;
+    const target = this.soundEnabled ? this.soundVolume : 0;
+    this.masterGain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.05);
   }
 
   _ensure() {
@@ -17,7 +31,6 @@ export class EngineAudio {
     } catch (e) { console.warn('Audio unavailable', e); }
   }
 
-  // Must be called from a user gesture to satisfy autoplay policies
   resume() {
     this._ensure();
     if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
@@ -27,6 +40,11 @@ export class EngineAudio {
   _build() {
     if (!this.ctx) return;
     const ctx = this.ctx;
+
+    // ===== Master gain (controlled by Settings) =====
+    this.masterGain = ctx.createGain();
+    this.masterGain.gain.value = this.soundEnabled ? this.soundVolume : 0;
+    this.masterGain.connect(ctx.destination);
 
     // ===== Engine: sawtooth + lowpass, frequency tracks speed/RPM =====
     this.engineOsc = ctx.createOscillator();
@@ -41,7 +59,6 @@ export class EngineAudio {
     this.engineFilter.frequency.value = 600;
     this.engineFilter.Q.value = 4;
 
-    // Sub oscillator for body
     this.subOsc = ctx.createOscillator();
     this.subOsc.type = 'triangle';
     this.subOsc.frequency.value = 30;
@@ -50,12 +67,12 @@ export class EngineAudio {
 
     this.engineOsc.connect(this.engineFilter);
     this.subOsc.connect(this.subGain).connect(this.engineFilter);
-    this.engineFilter.connect(this.engineGain).connect(ctx.destination);
+    this.engineFilter.connect(this.engineGain).connect(this.masterGain);
 
     this.engineOsc.start();
     this.subOsc.start();
 
-    // ===== Wind / tire noise: white noise → bandpass, gain tracks speed =====
+    // ===== Wind / tire noise =====
     const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const ch = noiseBuf.getChannelData(0);
     for (let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
@@ -71,10 +88,10 @@ export class EngineAudio {
     this.windGain = ctx.createGain();
     this.windGain.gain.value = 0;
 
-    this.noiseSrc.connect(this.windFilter).connect(this.windGain).connect(ctx.destination);
+    this.noiseSrc.connect(this.windFilter).connect(this.windGain).connect(this.masterGain);
     this.noiseSrc.start();
 
-    // ===== Drift screech: noise → highpass, gain tracks drift amount =====
+    // ===== Drift screech =====
     this.screechFilter = ctx.createBiquadFilter();
     this.screechFilter.type = 'highpass';
     this.screechFilter.frequency.value = 2500;
@@ -82,51 +99,39 @@ export class EngineAudio {
     this.screechGain = ctx.createGain();
     this.screechGain.gain.value = 0;
 
-    // Reuse the noise buffer
     this.screechSrc = ctx.createBufferSource();
     this.screechSrc.buffer = noiseBuf;
     this.screechSrc.loop = true;
-    this.screechSrc.connect(this.screechFilter).connect(this.screechGain).connect(ctx.destination);
+    this.screechSrc.connect(this.screechFilter).connect(this.screechGain).connect(this.masterGain);
     this.screechSrc.start();
 
     this._built = true;
   }
 
-  // speedFactor: 0..1, driftAmount: 0..1
   update(speedFactor, driftAmount) {
     if (!this.ctx || !this._built) return;
     const t = this.ctx.currentTime;
 
-    // Engine frequency: 50Hz idle, 220Hz at top speed
     const targetFreq = 50 + speedFactor * 170;
     this.engineOsc.frequency.setTargetAtTime(targetFreq, t, 0.05);
     this.subOsc.frequency.setTargetAtTime(targetFreq * 0.5, t, 0.05);
-
-    // Engine filter opens up with speed
     this.engineFilter.frequency.setTargetAtTime(400 + speedFactor * 1500, t, 0.05);
-
-    // Engine volume: small idle, fuller at speed
     this.engineGain.gain.setTargetAtTime(0.06 + speedFactor * 0.12, t, 0.1);
-
-    // Wind volume scales with speed
     this.windGain.gain.setTargetAtTime(speedFactor * 0.12, t, 0.1);
     this.windFilter.frequency.setTargetAtTime(400 + speedFactor * 1200, t, 0.1);
-
-    // Drift screech
     this.screechGain.gain.setTargetAtTime(driftAmount * 0.18, t, 0.05);
     this.screechFilter.frequency.setTargetAtTime(2000 + driftAmount * 2000, t, 0.05);
   }
 
-  // Quick celebratory chime when a checkpoint is hit
   chime(freq = 880, dur = 0.15, type = 'sine') {
-    if (!this.ctx) return;
+    if (!this.ctx || !this._built) return;
     const ctx = this.ctx;
     const o = ctx.createOscillator();
     o.type = type;
     o.frequency.value = freq;
     const g = ctx.createGain();
     g.gain.value = 0;
-    o.connect(g).connect(ctx.destination);
+    o.connect(g).connect(this.masterGain);
     const t = ctx.currentTime;
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(0.2, t + 0.01);
