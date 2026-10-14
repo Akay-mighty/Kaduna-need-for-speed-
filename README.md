@@ -1,37 +1,66 @@
-# LAGOS DRIFT — Low-Poly Checkpoint Racer (v3 — fixed)
+# LAGOS DRIFT — Cyberbeast Edition v4
 
-A Vercel-deployable 3D driving game built with **Three.js** + **Vite**. Drive a low-poly Jeep around a closed-loop Lagos city circuit. 3 laps, 8 gold-ring checkpoints, best-lap saved to localStorage.
-
----
-
-## What changed in v3 (the fix)
-
-The previous version had five critical bugs that made the live deployment look broken:
-
-| Bug | Root cause | Fix |
-|---|---|---|
-| Almost empty blue world | The imported `jeep.glb` had broken nested scales from `FBX2glTF` (root scale [300,100,50], children with scale 50/55/27 at translations of 1.55/1.27 — world-space wheels ended up hundreds of meters from the body). Applying `JEEP_SCALE=30` on top of that made the car a 600m-wide mess, with only "a tiny black object on the edge" visible. | **Replaced the imported Jeep with a clean procedural low-poly Jeep** built from boxes (chassis + body + hood + cabin + roll bar + windshield + bumpers + grille + 4 spinning wheels + spare tire + fender flares + headlights + taillights). Looks like a Jeep, drives like a Jeep, fully controllable. |
-| Broken / incomplete track | The `roads.glb` was instanced 256× across a grid, but its native scale was wrong and the orientation was random (90° rotation per tile). Resulted in disconnected random tiles. | **Replaced with a procedurally generated oval track** — a single continuous road mesh following a sampled centerline (2 straights + 2 half-circle ends, 617m total length). Lane stripes, edge lines, and start line all painted on the road. |
-| Two large white circles in the sky | A `CircleGeometry` "sun disc" + cloud puffs placed too close to the camera rendered as giant white blobs. | **Removed the sun disc.** Sky is now a clean 3-color gradient shader (top blue, mid light blue, horizon warm). Clouds are placed far from the camera. |
-| Camera pointing at sky / showing underside | Chase camera offset could go below the road when player pitched, and the look-at target wasn't clamped. | **Camera Y is clamped to ≥ 2.5**, look-at Y clamped to ≥ 0.5, and a `high` mode replaced the `cinematic` mode (which used to swing into the void). Player Y is locked to 0 so the car can never fall through the world. |
-| Missing Lagos city | Only 16 instances of the imported building GLB, all at the same scale, far from the track. | **Procedurally generated dense Lagos city**: ~50 inner-city buildings in cream/terracotta/blue/green/rust, ~80 track-side buildings, palm trees every 12m along the track, street lamps every 20m, 14 parked yellow taxis, 8 colored billboards, distant skyline ring from the imported `buildings.glb`. All buildings have window grids + roof slabs + sometimes rooftop water tanks. |
-| Player could fall off the world | No outer wall, no world-bounds clamp. | **Concrete Jersey barriers on both sides of the entire track** (400 segments, both inner + outer walls), plus a safety-net `clampToTrack()` that snaps the player back to the road if they somehow escape. |
+A Vercel-deployable 3D driving game built with **Three.js** + **Vite**. Drive a real Tesla Cybertruck Cyberbeast AWD through a low-poly Lagos city circuit. Race against 3 AI rivals, chase your own ghost best lap, hit the boost pads on the straights, and watch the city cycle from dawn through day, dusk, and night.
 
 ---
 
-## Game features (v3)
+## v4 features (on top of v3)
 
-- **Closed-loop oval track**: 120m straights + 60m-radius curves = 617m lap. Track math verified (continuity test passes).
-- **Procedural low-poly Jeep** with spinning wheels, steering front wheels, body lean, pitch on accel/brake, headlights + brake lights.
-- **Arcade physics**: throttle, brake, reverse, speed-sensitive steering, drift on `SPACE` (boosts turn rate + lateral slip).
-- **Collision**: circle-vs-AABB against ~400 barrier segments + ~130 building colliders. Player bleeds speed on impact and is pushed out.
-- **Checkpoint race**: 8 gold rings evenly spaced along the track, 3 laps, lap times + total time + best lap in `localStorage`.
-- **3 camera modes** (cycle with `C`): chase / hood / high.
-- **Live minimap**: track outline, dashed centerline, checkpoints, player triangle.
-- **Screen-space checkpoint arrow** with distance readout.
-- **Procedural WebAudio**: engine RPM that tracks speed, wind noise, drift screech, checkpoint chimes. No audio files needed.
-- **Mobile touch controls**: ◀ ▶ GO BRK DRIFT buttons, auto-enabled on touch devices.
-- **Lagos daytime**: gradient sky shader, warm sun, palm trees, yellow taxis, sand ring, drifting clouds.
+### 1. AI rival Cybertrucks (`src/rivals.js` — new)
+- 3 rivals spawn behind you in a start grid at race start
+- Each AI tracks its arc length `d` along the track centerline, looks ahead 5-15m based on speed, and steers toward that target
+- **Corner-aware speed control**: AI slows down when the upcoming track direction changes (samples 5m apart and measures angle delta)
+- **Per-rival personality**: randomized top speed (38-48 m/s), cornering (0.85-1.05), acceleration (18-24 m/s²)
+- **Collision with player**: cars bounce off each other, both lose speed
+- **Lap tracking**: each AI counts its own laps
+- **Position HUD**: top-right "Position 1/4" indicator updates every frame based on total progress (laps × trackLen + d)
+- **Minimap**: each rival drawn as a colored dot
+- Each rival is a **tinted Cybertruck clone** — orange, blue, green (their "Stainless_Steel" + "Black_Paint" materials recolored)
+
+### 2. Best-lap ghost replay (`src/ghost.js` — new)
+- Records player's `(x, z, heading)` at **30Hz** during each lap
+- On lap completion, if the new lap is faster than the stored best, the recording is saved to `localStorage` (`lagos-drift-ghost`)
+- On race start (if a best recording exists), a **translucent cyan Cybertruck** is spawned that plays back the recording on a loop
+- Race against your own best lap — visually clear feedback when you're pulling ahead or falling behind
+- Ghost is also drawn on the minimap as a cyan dot
+- "👻 GHOST READY" badge appears in the HUD when a ghost is loaded
+
+### 3. Day/night cycle (`src/game.js` `_updateTimeOfDay()`)
+- 4 keyframes interpolated: **DAWN → DAY → DUSK → NIGHT** (and back to DAWN)
+- Full cycle takes **3 minutes** (configurable via `TOD_CYCLE_SECONDS`)
+- Animates sky shader uniforms (`topColor`, `midColor`, `bottomColor`) — same gradient shader, just different colors
+- Animates scene background + fog color (fog pulls in closer at night for atmosphere)
+- Animates sun position (rises at dawn, peaks at noon, sets at dusk, goes dark at night)
+- Animates sun + hemisphere light intensity (low at night, bright at noon)
+- Adds a **moon** (soft blue directional light from the opposite side at night)
+- **Street lamps auto-toggle**: turn on at dusk, off at dawn
+- **HUD indicator** at top center: 🌅 DAWN · ☀ DAY · 🌆 DUSK · 🌙 NIGHT
+
+### 4. Boost pads (`src/boostpads.js` — new)
+- **6 boost pads** placed along the straights (3 on top straight, 3 on bottom)
+- Visual: glowing orange/yellow chevron arrows on the road + pulsing ground ring
+- Driving over a pad applies:
+  - 1.5× max speed multiplier for **2.5 seconds**
+  - 1.4× acceleration multiplier during boost
+- 4-second cooldown per pad (so you can't farm the same pad)
+- **Boost HUD**: animated "BOOST!" label + a depleting orange bar at the bottom of the screen
+- Boost pads also drawn on the minimap as orange dots
+
+---
+
+## Existing v3 features (still here)
+
+- Closed-loop oval track (617m, 2 straights + 2 half-circle curves)
+- Procedural low-poly Lagos city (~130 buildings, palms, lamps, taxis, billboards)
+- Concrete Jersey barriers on both sides (no falling off)
+- Player Y locked to 0 (never fall through world)
+- 8 checkpoints × 3 laps, best lap saved to localStorage
+- 3 camera modes (chase / hood / high), Y-clamped, ground-aware
+- Live minimap, screen-space checkpoint arrow, distance readout
+- Procedural WebAudio (engine RPM, wind, drift screech, checkpoint chimes, collision bump)
+- Mobile touch controls (◀ ▶ GO BRK DRIFT)
+
+---
 
 ## Controls
 
@@ -46,48 +75,44 @@ The previous version had five critical bugs that made the live deployment look b
 
 ## Deploy to Vercel
 
-`vercel.json` is pre-configured. Push the folder to git → Vercel → New Project → Deploy. Or:
-
 ```bash
 npm i -g vercel
 vercel --prod
 ```
+
+`vercel.json` is pre-configured.
 
 ## Project structure
 
 ```
 lagos-drift/
 ├── index.html
-├── package.json
-├── vite.config.js
-├── vercel.json
-├── README.md
-├── public/
-│   └── models/
-│       ├── building.glb   (933 KB — used for distant skyline ring)
-│       ├── buildings.glb  (472 KB — distant skyline decoration)
-│       ├── jeep.glb       (769 KB — included but NOT used; procedural Jeep is cleaner)
-│       └── roads.glb      (4 MB — included but NOT used; procedural track is cleaner)
+├── package.json / vite.config.js / vercel.json
+├── public/models/
+│   ├── cybertruck.glb   (9.3 MB — player car + cloned for rivals + ghost)
+│   ├── building.glb      (933 KB — distant skyline)
+│   └── buildings.glb     (472 KB — distant skyline)
 └── src/
-    ├── main.js         — bootstrap (loader → start screen → race)
-    ├── game.js         — scene, lights, sky, render loop, race flow, HUD
-    ├── city.js         — procedural oval track + barriers + buildings + palms + lamps + taxis + billboards + checkpoints
-    ├── player.js       — procedural low-poly Jeep + arcade physics + wheel spin
-    ├── camera.js       — chase / hood / high camera with Y-clamp
-    ├── input.js        — keyboard + touch
-    ├── audio.js        — procedural WebAudio engine + drift
-    └── race.js         — checkpoint state machine + lap timer
+    ├── main.js             — bootstrap
+    ├── game.js             — scene, lights, sky, day/night, render loop, race flow, HUD
+    ├── city.js             — oval track + barriers + buildings + palms + lamps + taxis + billboards + checkpoints
+    ├── player.js           — Cybertruck model + arcade physics + boost multiplier
+    ├── camera.js           — chase / hood / high camera
+    ├── input.js            — keyboard + touch
+    ├── audio.js            — procedural WebAudio
+    ├── race.js             — checkpoint state machine + lap timer
+    ├── rivals.js   (NEW)   — 3 AI Cybertrucks, chase AI, collision, position tracking
+    ├── ghost.js    (NEW)   — best-lap recording + replay as translucent Cybertruck
+    └── boostpads.js (NEW)  — boost pads on straights, temporary speed boost
 ```
-
-The two imported GLB files that *are* still used (`building.glb` and `buildings.glb`) are loaded with `GLTFLoader` and used only as distant decorative skyline. The two unused GLBs (`jeep.glb`, `roads.glb`) are kept in the bundle for reference but no longer loaded — they could be removed to slim the deploy.
 
 ## Tech
 
 - [three.js](https://threejs.org/) ~0.160
 - [Vite](https://vitejs.dev/) 5
-- 100% static — no backend, no API keys, no external runtime assets
-- Total bundle size: ~3.6 MB (mostly the GLBs; could be trimmed to ~1.5 MB by deleting unused GLBs)
+- 100% static, no backend, no API keys
+- Bundle: ~3.6 MB zip / ~10 MB unpacked (mostly the Cybertruck GLB)
 
 ## License
 
-Code: MIT. The 3D models belong to their respective creators and are used here only as game assets in this single Vercel-deployable bundle.
+Code: MIT. 3D models belong to their respective creators.
