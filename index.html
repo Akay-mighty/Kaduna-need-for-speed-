@@ -181,6 +181,137 @@
     }
     .credit { position: fixed; bottom: .4rem; right: .6rem; z-index: 60; font-size: .65rem; color: rgba(255,255,255,.3); letter-spacing: .15em; pointer-events: none; font-family: 'Space Grotesk', monospace; }
 
+    /* ===== FPS counter ===== */
+    #fps-counter {
+      position: fixed; bottom: .4rem; left: .6rem; z-index: 60;
+      font-family: 'Space Grotesk', monospace; font-size: .75rem;
+      color: rgba(255,255,255,.7); background: rgba(0,0,0,.4);
+      padding: .15rem .4rem; border-radius: 4px; pointer-events: none;
+      display: none;
+    }
+    #fps-counter.active { display: block; }
+
+    /* ===== Settings button (gear icon, persistent) ===== */
+    .settings-btn {
+      position: fixed; top: 1rem; right: 1rem; z-index: 88;   /* above most HUD */
+      width: 40px; height: 40px; border-radius: 50%;
+      background: rgba(8, 18, 36, .8); border: 1px solid rgba(255,255,255,.15);
+      color: #fff; font-size: 1.3rem; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      backdrop-filter: blur(8px); transition: background .15s, transform .15s;
+      pointer-events: auto;
+    }
+    .settings-btn:hover { background: rgba(8, 18, 36, .95); transform: rotate(20deg); }
+    .settings-btn:active { transform: rotate(45deg); }
+
+    /* ===== Settings overlay ===== */
+    #settings-overlay {
+      position: fixed; inset: 0; z-index: 200; display: none;
+      align-items: center; justify-content: center; padding: 1rem;
+      background: rgba(8, 18, 36, .85); backdrop-filter: blur(10px);
+    }
+    #settings-overlay.active { display: flex; }
+    .settings-card {
+      background: rgba(10, 20, 40, .92); border: 1px solid rgba(255,255,255,.12);
+      border-radius: 18px; padding: 1.6rem;
+      max-width: 480px; width: 100%; max-height: 90vh; overflow-y: auto;
+      box-shadow: 0 30px 80px rgba(0,0,0,.5);
+    }
+    .settings-card h2 {
+      font-family: 'Outfit', sans-serif; font-weight: 900; font-size: 1.6rem;
+      margin-bottom: 1.2rem; letter-spacing: -.02em;
+    }
+    .settings-section {
+      padding: .8rem 0; border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+    .settings-section:last-of-type { border-bottom: none; }
+    .settings-section .section-label {
+      font-size: .75rem; letter-spacing: .25em; color: rgba(255,255,255,.55);
+      text-transform: uppercase; font-weight: 600; margin-bottom: .6rem;
+    }
+    /* Quality buttons */
+    .quality-row { display: flex; gap: .5rem; }
+    .quality-btn {
+      flex: 1; padding: .6rem; border: 1px solid rgba(255,255,255,.15);
+      background: rgba(255,255,255,.04); color: rgba(255,255,255,.7);
+      border-radius: 8px; cursor: pointer; font-family: 'Outfit', sans-serif;
+      font-weight: 600; font-size: .85rem; transition: all .15s;
+    }
+    .quality-btn:hover { background: rgba(255,255,255,.08); }
+    .quality-btn.active {
+      background: rgba(255, 210, 63, .15); border-color: #ffd23f; color: #ffd23f;
+    }
+    /* Toggle row */
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: .4rem 0;
+    }
+    .toggle-row .toggle-label { font-size: .9rem; color: rgba(255,255,255,.85); }
+    .switch {
+      position: relative; width: 48px; height: 26px; background: rgba(255,255,255,.15);
+      border-radius: 13px; cursor: pointer; transition: background .15s;
+    }
+    .switch::after {
+      content: ''; position: absolute; top: 3px; left: 3px;
+      width: 20px; height: 20px; background: #fff; border-radius: 50%;
+      transition: transform .15s;
+    }
+    .switch input { display: none; }
+    .switch.on { background: #ffd23f; }
+    .switch.on::after { transform: translateX(22px); }
+    /* Volume slider */
+    .slider-row { padding: .4rem 0; }
+    .slider-row .slider-label {
+      display: flex; justify-content: space-between; font-size: .85rem;
+      color: rgba(255,255,255,.75); margin-bottom: .4rem;
+    }
+    .slider-row .slider-value {
+      font-family: 'Space Grotesk', monospace; color: #ffd23f; font-weight: 600;
+    }
+    input[type=range] {
+      width: 100%; height: 6px; background: rgba(255,255,255,.15); border-radius: 3px;
+      -webkit-appearance: none; appearance: none; outline: none; cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 18px; height: 18px; background: #ffd23f;
+      border-radius: 50%; cursor: pointer;
+    }
+    input[type=range]::-moz-range-thumb {
+      width: 18px; height: 18px; background: #ffd23f; border-radius: 50%;
+      border: none; cursor: pointer;
+    }
+    /* Settings buttons */
+    .settings-actions { display: flex; gap: .6rem; margin-top: 1.2rem; }
+    .settings-actions button { flex: 1; }
+    .btn-secondary {
+      padding: .9rem; border: 1px solid rgba(255,255,255,.2); border-radius: 10px;
+      background: rgba(255,255,255,.05); color: #fff; cursor: pointer;
+      font-family: 'Outfit', sans-serif; font-weight: 600; font-size: .9rem;
+      transition: background .15s;
+    }
+    .btn-secondary:hover { background: rgba(255,255,255,.1); }
+    .btn-danger {
+      padding: .9rem; border: 1px solid rgba(255,90,90,.4); border-radius: 10px;
+      background: rgba(255,90,90,.1); color: #ff7070; cursor: pointer;
+      font-family: 'Outfit', sans-serif; font-weight: 600; font-size: .9rem;
+      transition: background .15s;
+    }
+    .btn-danger:hover { background: rgba(255,90,90,.2); }
+    .btn-save {
+      padding: .9rem; border: none; border-radius: 10px;
+      background: linear-gradient(135deg, #ffd23f, #ff6b35); color: #1a0f00;
+      cursor: pointer; font-family: 'Outfit', sans-serif; font-weight: 700;
+      font-size: .95rem; box-shadow: 0 8px 20px rgba(255, 107, 53, .3);
+      transition: transform .15s;
+    }
+    .btn-save:hover { transform: translateY(-1px); }
+
+    /* Mobile: settings buttons stack better */
+    @media (max-width: 480px) {
+      .settings-card { padding: 1.2rem; }
+      .settings-actions { flex-direction: column; }
+    }
+
     /* ===== Position card (rival place indicator) ===== */
     .pos-card {
       position: fixed; top: 50%; right: 1rem; transform: translateY(-50%); z-index: 78;
@@ -365,6 +496,106 @@
   </div>
 
   <div class="credit">LAGOS DRIFT · CYBERBEAST · THREE.JS · VERCEL</div>
+
+  <!-- FPS counter (hidden unless Show FPS = on in Settings) -->
+  <div id="fps-counter">60 FPS</div>
+
+  <!-- Settings button (always available) -->
+  <button class="settings-btn" id="settings-btn-open" title="Settings">⚙</button>
+
+  <!-- Settings overlay -->
+  <div id="settings-overlay">
+    <div class="settings-card">
+      <h2>⚙ Settings</h2>
+
+      <!-- Graphics Quality -->
+      <div class="settings-section">
+        <div class="section-label">Graphics Quality</div>
+        <div class="quality-row">
+          <button class="quality-btn" data-quality="low">Low</button>
+          <button class="quality-btn" data-quality="medium">Medium</button>
+          <button class="quality-btn" data-quality="high">High</button>
+        </div>
+      </div>
+
+      <!-- Sound Effects -->
+      <div class="settings-section">
+        <div class="section-label">Sound Effects</div>
+        <div class="toggle-row">
+          <span class="toggle-label">Enabled</span>
+          <div class="switch" id="sound-switch">
+            <input type="checkbox" id="sound-toggle">
+          </div>
+        </div>
+        <div class="slider-row">
+          <div class="slider-label">
+            <span>Volume</span>
+            <span class="slider-value" id="sound-volume-value">70%</span>
+          </div>
+          <input type="range" id="sound-volume" min="0" max="1" step="0.05">
+        </div>
+      </div>
+
+      <!-- Music -->
+      <div class="settings-section">
+        <div class="section-label">Music</div>
+        <div class="toggle-row">
+          <span class="toggle-label">Enabled</span>
+          <div class="switch" id="music-switch">
+            <input type="checkbox" id="music-toggle">
+          </div>
+        </div>
+        <div class="slider-row">
+          <div class="slider-label">
+            <span>Volume</span>
+            <span class="slider-value" id="music-volume-value">40%</span>
+          </div>
+          <input type="range" id="music-volume" min="0" max="1" step="0.05">
+        </div>
+      </div>
+
+      <!-- Control Sensitivity -->
+      <div class="settings-section">
+        <div class="section-label">Control Sensitivity</div>
+        <div class="slider-row">
+          <div class="slider-label">
+            <span>Steering</span>
+            <span class="slider-value" id="steer-sens-value">1.00</span>
+          </div>
+          <input type="range" id="steer-sens" min="0.5" max="2" step="0.05">
+        </div>
+      </div>
+
+      <!-- Camera Distance -->
+      <div class="settings-section">
+        <div class="section-label">Camera Distance</div>
+        <div class="slider-row">
+          <div class="slider-label">
+            <span>Distance</span>
+            <span class="slider-value" id="cam-dist-value">14m</span>
+          </div>
+          <input type="range" id="cam-dist" min="5" max="25" step="1">
+        </div>
+      </div>
+
+      <!-- Show FPS -->
+      <div class="settings-section">
+        <div class="toggle-row">
+          <span class="toggle-label">Show FPS counter</span>
+          <div class="switch" id="fps-switch">
+            <input type="checkbox" id="fps-toggle">
+          </div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="settings-actions">
+        <button class="btn-danger" id="settings-reset">Reset to Default</button>
+        <button class="btn-save" id="settings-back-game">Back to Game</button>
+      </div>
+      <button class="btn-secondary" id="settings-back-menu" style="margin-top:.5rem;width:100%">Back to Menu</button>
+    </div>
+  </div>
 
   <script type="module" src="/src/main.js"></script>
 </body>
