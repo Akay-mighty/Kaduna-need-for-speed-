@@ -1,59 +1,78 @@
 // ============================================================
-// Neon Drive 3D — Entry point
-// Bootstraps the game, loads assets, then hands off to the Game.
+// main.js — bootstrap: hide loader when models load, show start screen
 // ============================================================
 import { Game } from './game.js';
-import { CARS } from './cars.js';
 
 const loaderFill = document.getElementById('loader-fill');
 const loaderPct = document.getElementById('loader-pct');
+const loaderStatus = document.getElementById('loader-status');
 const loaderEl = document.getElementById('loader');
-const selectEl = document.getElementById('car-select');
-const grid = document.getElementById('car-grid');
+const startEl = document.getElementById('start');
+const endEl = document.getElementById('end');
 
-// Populate car-select UI from CARS metadata
-CARS.forEach((car, idx) => {
-  const card = document.createElement('div');
-  card.className = 'car-card';
-  card.innerHTML = `
-    <span class="tag">${car.tag}</span>
-    <img src="${car.img}" alt="${car.name}" />
-    <h3>${car.name}</h3>
-    <div class="stats">
-      <div class="stat">SPD<div class="stat-bar"><div style="width:${car.stats.speed}%"></div></div></div>
-      <div class="stat">ACC<div class="stat-bar"><div style="width:${car.stats.accel}%"></div></div></div>
-      <div class="stat">HND<div class="stat-bar"><div style="width:${car.stats.handling}%"></div></div></div>
-    </div>
-  `;
-  card.addEventListener('click', () => startGame(idx));
-  grid.appendChild(card);
-});
-
-// Preload the three car textures + city texture so the loader is meaningful
-const allImgs = [...CARS.map(c => c.img), '/city-scene.jpg'];
-let loaded = 0;
-allImgs.forEach(src => {
-  const im = new Image();
-  im.onload = im.onerror = () => {
-    loaded++;
-    const pct = Math.round((loaded / allImgs.length) * 100);
-    loaderFill.style.width = pct + '%';
-    loaderPct.textContent = pct + '%';
-    if (loaded === allImgs.length) {
-      setTimeout(() => {
-        loaderEl.classList.add('hidden');
-        selectEl.classList.add('active');
-      }, 400);
-    }
-  };
-  im.src = src;
-});
-
-// Boot the game engine once, then drive it via startGame()
 const game = new Game();
-game.init();
 
-function startGame(carIdx) {
-  selectEl.classList.remove('active');
-  game.startWithCar(CARS[carIdx]);
+// Coarse progress: a few discrete jumps while the heavy GLBs download
+let progress = 0;
+const tick = setInterval(() => {
+  progress = Math.min(95, progress + 1);
+  loaderFill.style.width = progress + '%';
+  loaderPct.textContent = progress + '%';
+}, 80);
+
+game.init((pct, status) => {
+  if (pct) {
+    progress = Math.max(progress, pct);
+    loaderFill.style.width = progress + '%';
+    loaderPct.textContent = progress + '%';
+  }
+  if (status) loaderStatus.textContent = status;
+}).then(() => {
+  clearInterval(tick);
+  loaderFill.style.width = '100%';
+  loaderPct.textContent = '100%';
+  loaderStatus.textContent = 'Ready';
+  setTimeout(() => {
+    loaderEl.classList.add('hidden');
+    startEl.classList.add('active');
+  }, 500);
+}).catch(err => {
+  clearInterval(tick);
+  console.error(err);
+  loaderStatus.textContent = 'Error: ' + (err.message || err);
+});
+
+document.getElementById('start-race').addEventListener('click', () => {
+  startEl.classList.remove('active');
+  game.startRace();
+});
+
+document.getElementById('end-restart').addEventListener('click', () => {
+  endEl.classList.remove('active');
+  document.getElementById('cp-arrow').style.display = 'block';
+  document.getElementById('cp-distance').style.display = 'block';
+  // Reset HUD state
+  document.getElementById('lap-current').textContent = '1';
+  document.getElementById('cp-current').textContent = '1';
+  document.getElementById('lap-time-last').textContent = '--:--.---';
+  document.getElementById('lap-time-best').textContent = 'Best: ' + (game.race.bestLap ? formatTimeLocal(game.race.bestLap) : '--:--.---');
+  game._refreshBestTime();
+  game.startRace();
+});
+
+document.getElementById('end-menu').addEventListener('click', () => {
+  endEl.classList.remove('active');
+  document.getElementById('cp-arrow').style.display = 'block';
+  document.getElementById('cp-distance').style.display = 'block';
+  startEl.classList.add('active');
+  game.started = false;
+  document.getElementById('hud').classList.remove('active');
+  document.getElementById('touch').classList.remove('active');
+});
+
+function formatTimeLocal(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 1000);
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(ms).padStart(3,'0')}`;
 }

@@ -1,368 +1,323 @@
 // ============================================================
-// city.js — Procedural neon NYC-style grid city
-// Builds roads, blocks, buildings with emissive neon strips,
-// street props (trees, lamps), and decorative billboards
-// using the uploaded city-scene.jpg texture as a skybox backdrop.
+// city.js — Lagos-style low-poly city assembled from:
+//   - Modular road pieces (roads.glb, ~30 meshes) → grid of road tiles
+//   - Textured building (building.glb, 282 meshes) → instances at intersections
+//   - Background skyline (buildings.glb, 22 primitives) → ring around map
+//   - Palm trees + yellow taxis (procedural) → Lagos flavor
+//
+// Road grid layout: 5x5 blocks, each block ~40m, road tile ~10m.
+// Player Jeep (scale 30) drives on the road grid.
 // ============================================================
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-const BLOCK = 40;       // city block size (meters)
-const ROAD = 12;        // road width
-const GRID = 7;         // GRID x GRID blocks => city extent
-const HALF = (GRID * (BLOCK + ROAD)) / 2;
+const TILE = 10;          // one road tile = 10m
+const GRID = 16;          // 16x16 tiles
+const HALF = (GRID * TILE) / 2;
+const ROAD_SCALE = 30;    // road mesh native ~0.4 → tile of ~12m (a bit of overlap)
+const BUILDING_SCALE = 25;
+const JEEP_SCALE = 30;
 
 export class City {
   constructor(scene) {
     this.scene = scene;
-    this.buildings = [];
-    this.lamps = [];
-    this.trees = [];
-    this.coins = [];
-    this.billboards = [];
-    this._build();
+    this.roadMesh = null;
+    this.buildingScene = null;
+    this.skylineMesh = null;
+    this.colliders = []; // {minX, maxX, minZ, maxZ} for buildings
+    this.checkpoints = [];
+    this.palms = [];
+    this.taxis = [];
+    this.tarmacMesh = null;
   }
 
-  _build() {
-    this._buildGround();
-    this._buildRoads();
-    this._buildBlocks();
-    this._buildBorder();
-    this._spawnCoins();
-    this._buildBillboards();
+  async loadAll(onProgress) {
+    const loader = new GLTFLoader();
+    const report = (n, t) => onProgress && onProgress(n, t);
+
+    report(15, 'Loading road kit…');
+    const roadsGltf = await loader.loadAsync('/models/roads.glb');
+    this._extractRoadMesh(roadsGltf);
+
+    report(45, 'Loading building model…');
+    const bGltf = await loader.loadAsync('/models/building.glb');
+    this.buildingScene = bGltf.scene;
+
+    report(70, 'Loading skyline…');
+    const sGltf = await loader.loadAsync('/models/buildings.glb');
+    this.skylineMesh = sGltf.scene;
+
+    report(85, 'Assembling city…');
+    this._buildTarmac();
+    this._placeRoads();
+    this._placeBuildings();
+    this._placeSkyline();
+    this._placePalms();
+    this._placeTaxis();
+    this._defineCheckpoints();
+    report(100, 'Done');
   }
 
-  _buildGround() {
-    // Dark asphalt-tinted ground plane
-    const g = new THREE.PlaneGeometry(400, 400);
-    const m = new THREE.MeshStandardMaterial({
-      color: 0x0a0a18, roughness: 0.95, metalness: 0.1
+  _extractRoadMesh(gltf) {
+    // Pick the "Road Flat" mesh from the kit
+    const target = gltf.scene.children.find(c => c.name === 'Road Flat') || gltf.scene.children[0];
+    // The FBX2glTF output stores each mesh as a Group with multiple Mesh children — clone the whole group
+    this.roadSource = target.clone(true);
+    this.roadSource.traverse(c => {
+      c.castShadow = false;
+      c.receiveShadow = true;
     });
-    const plane = new THREE.Mesh(g, m);
-    plane.rotation.x = -Math.PI / 2;
-    plane.position.y = -0.02;
-    plane.receiveShadow = true;
-    this.scene.add(plane);
   }
 
-  _buildRoads() {
-    // Glowing road strips along the grid lines
-    const span = GRID * (BLOCK + ROAD);
-    const roadMat = new THREE.MeshStandardMaterial({
-      color: 0x101028, roughness: 0.6, metalness: 0.2,
-      emissive: 0x05d9e8, emissiveIntensity: 0.04
+  _buildTarmac() {
+    // Big warm-concrete ground plane under everything
+    const geo = new THREE.PlaneGeometry(GRID * TILE + 40, GRID * TILE + 40);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xb8a878,  // warm sand/concrete
+      roughness: 0.95, metalness: 0.0
     });
-    const stripeMat = new THREE.MeshBasicMaterial({ color: 0x05d9e8 });
+    this.tarmacMesh = new THREE.Mesh(geo, mat);
+    this.tarmacMesh.rotation.x = -Math.PI / 2;
+    this.tarmacMesh.position.y = -0.02;
+    this.tarmacMesh.receiveShadow = true;
+    this.scene.add(this.tarmacMesh);
 
-    for (let i = 0; i <= GRID; i++) {
-      const pos = -HALF + i * (BLOCK + ROAD) + BLOCK / 2;
-
-      // Horizontal road
-      const rh = new THREE.Mesh(new THREE.PlaneGeometry(span, ROAD), roadMat);
-      rh.rotation.x = -Math.PI / 2;
-      rh.position.set(0, 0, pos);
-      rh.receiveShadow = true;
-      this.scene.add(rh);
-
-      // Vertical road
-      const rv = new THREE.Mesh(new THREE.PlaneGeometry(ROAD, span), roadMat);
-      rv.rotation.x = -Math.PI / 2;
-      rv.position.set(pos, 0, 0);
-      rv.receiveShadow = true;
-      this.scene.add(rv);
-
-      // Dashed center stripes (emissive)
-      for (let j = 0; j < GRID; j++) {
-        const cpos = -HALF + j * (BLOCK + ROAD) + (BLOCK + ROAD) / 2;
-        const dashH = new THREE.Mesh(new THREE.PlaneGeometry(3, 0.3), stripeMat);
-        dashH.rotation.x = -Math.PI / 2;
-        dashH.position.set(cpos, 0.01, pos);
-        this.scene.add(dashH);
-
-        const dashV = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 3), stripeMat);
-        dashV.rotation.x = -Math.PI / 2;
-        dashV.position.set(pos, 0.01, cpos);
-        this.scene.add(dashV);
-      }
-    }
+    // A circular sandy ground around the city
+    const sandGeo = new THREE.CircleGeometry(HALF * 2.2, 64);
+    const sandMat = new THREE.MeshStandardMaterial({ color: 0xd4b97a, roughness: 1.0 });
+    const sand = new THREE.Mesh(sandGeo, sandMat);
+    sand.rotation.x = -Math.PI / 2;
+    sand.position.y = -0.05;
+    sand.receiveShadow = true;
+    this.scene.add(sand);
   }
 
-  _buildBlocks() {
-    // For each block (between roads), drop a cluster of buildings
+  _placeRoads() {
+    // Lay down a full grid of road tiles
     for (let gx = 0; gx < GRID; gx++) {
       for (let gz = 0; gz < GRID; gz++) {
-        const cx = -HALF + gx * (BLOCK + ROAD) + (BLOCK + ROAD) / 2;
-        const cz = -HALF + gz * (BLOCK + ROAD) + (BLOCK + ROAD) / 2;
-        this._buildOneBlock(cx, cz);
+        const x = -HALF + gx * TILE + TILE / 2;
+        const z = -HALF + gz * TILE + TILE / 2;
+        const tile = this.roadSource.clone(true);
+        tile.position.set(x, 0, z);
+        tile.scale.setScalar(ROAD_SCALE);
+        tile.rotation.y = (Math.random() < 0.5) ? 0 : Math.PI / 2;
+        this.scene.add(tile);
       }
     }
   }
 
-  _buildOneBlock(cx, cz) {
-    // Skip the central block — that's the spawn area, kept clear
-    if (Math.abs(cx) < BLOCK / 2 + 1 && Math.abs(cz) < BLOCK / 2 + 1) {
-      this._buildPark(cx, cz);
-      return;
-    }
-
-    // Sidewalk pad
-    const padGeo = new THREE.BoxGeometry(BLOCK, 0.4, BLOCK);
-    const padMat = new THREE.MeshStandardMaterial({ color: 0x1a1a30, roughness: 0.8 });
-    const pad = new THREE.Mesh(padGeo, padMat);
-    pad.position.set(cx, 0.2, cz);
-    pad.receiveShadow = true;
-    this.scene.add(pad);
-
-    // 2x2 building footprints
-    const foot = BLOCK / 2;
-    const neonColors = [0xff2a6d, 0x05d9e8, 0xfff15c, 0x9d4edd, 0x06ffa5, 0xff7700];
-    for (let bx = 0; bx < 2; bx++) {
-      for (let bz = 0; bz < 2; bz++) {
-        const px = cx - foot / 2 + bx * foot;
-        const pz = cz - foot / 2 + bz * foot;
-        const h = 8 + Math.random() * 32;
-        const w = foot - 2 - Math.random() * 4;
-        const d = foot - 2 - Math.random() * 4;
-        const b = this._makeBuilding(w, h, d, neonColors[Math.floor(Math.random() * neonColors.length)]);
-        b.position.set(px, 0.4 + h / 2, pz);
-        b.castShadow = true;
-        b.receiveShadow = true;
-        this.scene.add(b);
-        this.buildings.push(b);
+  _placeBuildings() {
+    // Place the textured building at every 4th road intersection (leaving room for the road grid)
+    const positions = [];
+    for (let bx = 0; bx < 4; bx++) {
+      for (let bz = 0; bz < 4; bz++) {
+        const x = -HALF + (bx + 0.5) * (GRID * TILE / 4);
+        const z = -HALF + (bz + 0.5) * (GRID * TILE / 4);
+        positions.push({ x, z });
       }
     }
 
-    // Corner street lamps
-    this._addLamp(cx - BLOCK / 2 + 1, cz - BLOCK / 2 + 1);
-    this._addLamp(cx + BLOCK / 2 - 1, cz - BLOCK / 2 + 1);
-    this._addLamp(cx - BLOCK / 2 + 1, cz + BLOCK / 2 - 1);
-    this._addLamp(cx + BLOCK / 2 - 1, cz + BLOCK / 2 - 1);
-  }
-
-  _makeBuilding(w, h, d, neon) {
-    const grp = new THREE.Group();
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: 0x202038, roughness: 0.55, metalness: 0.6
-    });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bodyMat);
-    grp.add(body);
-
-    // Emissive window grid (front + back + sides)
-    const winMat = new THREE.MeshBasicMaterial({ color: neon, transparent: true, opacity: 0.85 });
-    const rows = Math.max(2, Math.floor(h / 3));
-    const cols = Math.max(2, Math.floor(w / 2.5));
-    const winGeo = new THREE.PlaneGeometry(0.7, 1.1);
-
-    const sides = [
-      { ax: 'x', off: d / 2 + 0.01, rot: [0, Math.PI / 2, 0] },
-      { ax: 'x', off: -d / 2 - 0.01, rot: [0, -Math.PI / 2, 0] },
-      { ax: 'z', off: w / 2 + 0.01, rot: [0, 0, 0] },
-      { ax: 'z', off: -w / 2 - 0.01, rot: [0, Math.PI, 0] }
-    ];
-    sides.forEach(s => {
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          if (Math.random() < 0.25) continue; // sparse dark windows
-          const win = new THREE.Mesh(winGeo, winMat);
-          const y = -h / 2 + 1.5 + r * 3;
-          const x = -w / 2 + 1.5 + c * 2.5;
-          if (s.ax === 'x') {
-            win.position.set(x, y, s.off);
-          } else {
-            win.position.set(s.off, y, x);
-          }
-          win.rotation.set(...s.rot);
-          grp.add(win);
+    positions.forEach((p, i) => {
+      const b = this.buildingScene.clone(true);
+      b.position.set(p.x, 0, p.z);
+      b.scale.setScalar(BUILDING_SCALE);
+      b.rotation.y = (i * 37) % 360 * Math.PI / 180;
+      b.traverse(c => {
+        if (c.isMesh) {
+          c.castShadow = true;
+          c.receiveShadow = true;
         }
-      }
+      });
+      this.scene.add(b);
+
+      // Compute collider AABB from world bounds
+      // Building native bounds are ~0.08m → scaled to ~2m. Use generous collider.
+      const halfBox = 5;  // generous hitbox for the building cluster
+      this.colliders.push({
+        x: p.x, z: p.z, half: halfBox,
+        minX: p.x - halfBox, maxX: p.x + halfBox,
+        minZ: p.z - halfBox, maxZ: p.z + halfBox,
+      });
     });
-
-    // Rooftop neon trim
-    const trim = new THREE.Mesh(
-      new THREE.BoxGeometry(w + 0.4, 0.2, d + 0.4),
-      new THREE.MeshBasicMaterial({ color: neon })
-    );
-    trim.position.y = h / 2 + 0.1;
-    grp.add(trim);
-
-    return grp;
   }
 
-  _addLamp(x, z) {
-    const grp = new THREE.Group();
-    const poleMat = new THREE.MeshStandardMaterial({ color: 0x2a2a3a, metalness: 0.6, roughness: 0.4 });
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 5, 8), poleMat);
-    pole.position.y = 2.5;
-    grp.add(pole);
-
-    const headMat = new THREE.MeshBasicMaterial({ color: 0xfff15c });
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 12), headMat);
-    head.position.y = 5;
-    grp.add(head);
-
-    // Point light
-    const light = new THREE.PointLight(0xfff15c, 0.6, 18, 2);
-    light.position.y = 5;
-    grp.add(light);
-
-    grp.position.set(x, 0, z);
-    this.scene.add(grp);
-    this.lamps.push(grp);
-  }
-
-  _buildPark(cx, cz) {
-    // Central plaza with a glowing ring and trees
-    const pad = new THREE.Mesh(
-      new THREE.CircleGeometry(BLOCK / 2, 48),
-      new THREE.MeshStandardMaterial({ color: 0x1a1a30, roughness: 0.8 })
-    );
-    pad.rotation.x = -Math.PI / 2;
-    pad.position.set(cx, 0.05, cz);
-    this.scene.add(pad);
-
-    // Neon ring
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(BLOCK / 2 - 4, BLOCK / 2 - 3.5, 48),
-      new THREE.MeshBasicMaterial({ color: 0x05d9e8, side: THREE.DoubleSide })
-    );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(cx, 0.07, cz);
-    this.scene.add(ring);
-
-    // A few stylized trees
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2;
-      const r = BLOCK / 2 - 8;
-      const x = cx + Math.cos(a) * r;
-      const z = cz + Math.sin(a) * r;
-      this._addTree(x, z);
+  _placeSkyline() {
+    // Ring the city with the 22-building cluster from the USDZ — pure decoration
+    const radius = HALF + 30;
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      const s = this.skylineMesh.clone(true);
+      s.position.set(x, 0, z);
+      s.scale.setScalar(8);
+      s.rotation.y = -angle;
+      s.traverse(c => {
+        if (c.isMesh) {
+          c.castShadow = false;
+          c.receiveShadow = false;
+        }
+      });
+      this.scene.add(s);
     }
   }
 
-  _addTree(x, z) {
-    const grp = new THREE.Group();
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.25, 0.35, 2, 8),
-      new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.9 })
-    );
-    trunk.position.y = 1;
-    grp.add(trunk);
+  _placePalms() {
+    // Stylized palm trees along the sidewalks (every other block boundary)
+    const trunkGeo = new THREE.CylinderGeometry(0.25, 0.4, 5, 8);
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8b6a3f, roughness: 0.9 });
+    const frondMat = new THREE.MeshStandardMaterial({ color: 0x2d8a3e, roughness: 0.7 });
+    const frondGeo = new THREE.ConeGeometry(1.5, 4, 5);
 
-    const fol = new THREE.Mesh(
-      new THREE.SphereGeometry(1.6, 12, 12),
-      new THREE.MeshStandardMaterial({ color: 0x06ffa5, emissive: 0x06ffa5, emissiveIntensity: 0.15, roughness: 0.8 })
-    );
-    fol.position.y = 3;
-    grp.add(fol);
+    for (let i = 0; i < 40; i++) {
+      const grp = new THREE.Group();
+      const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+      trunk.position.y = 2.5;
+      trunk.castShadow = true;
+      grp.add(trunk);
 
-    grp.position.set(x, 0, z);
-    grp.castShadow = true;
-    this.scene.add(grp);
-    this.trees.push(grp);
-  }
-
-  _buildBorder() {
-    // Outer wall of glowing bars so the player can't drive off the map
-    const span = GRID * (BLOCK + ROAD);
-    const barMat = new THREE.MeshBasicMaterial({ color: 0xff2a6d });
-    const step = 8;
-    for (let i = -HALF; i <= HALF; i += step) {
-      // North + South
-      for (const z of [-HALF, HALF]) {
-        const b = new THREE.Mesh(new THREE.BoxGeometry(0.6, 4, 0.6), barMat);
-        b.position.set(i, 2, z);
-        this.scene.add(b);
+      // 5 fronds on top
+      for (let f = 0; f < 5; f++) {
+        const frond = new THREE.Mesh(frondGeo, frondMat);
+        frond.position.y = 5.5;
+        frond.rotation.z = Math.PI / 4 + Math.random() * 0.3;
+        frond.rotation.y = (f / 5) * Math.PI * 2;
+        frond.position.x = Math.cos((f / 5) * Math.PI * 2) * 0.5;
+        frond.position.z = Math.sin((f / 5) * Math.PI * 2) * 0.5;
+        frond.scale.set(0.6, 0.6, 0.6);
+        frond.castShadow = true;
+        grp.add(frond);
       }
-      // East + West
-      for (const x of [-HALF, HALF]) {
-        const b = new THREE.Mesh(new THREE.BoxGeometry(0.6, 4, 0.6), barMat);
-        b.position.set(x, 2, i);
-        this.scene.add(b);
-      }
+
+      // Place at edge of map on a ring
+      const angle = (i / 40) * Math.PI * 2 + Math.random() * 0.2;
+      const r = HALF + 5 + Math.random() * 8;
+      grp.position.set(Math.cos(angle) * r, 0, Math.sin(angle) * r);
+      grp.rotation.y = Math.random() * Math.PI * 2;
+      grp.scale.setScalar(0.8 + Math.random() * 0.6);
+      this.scene.add(grp);
+      this.palms.push(grp);
     }
   }
 
-  // Collectible coins scattered along the road grid
-  _spawnCoins() {
-    const coinGeo = new THREE.CylinderGeometry(0.7, 0.7, 0.2, 16);
-    const coinMat = new THREE.MeshStandardMaterial({
-      color: 0xfff15c, emissive: 0xffd700, emissiveIntensity: 0.6, metalness: 0.9, roughness: 0.2
-    });
-    const total = 40;
-    for (let i = 0; i < total; i++) {
-      // Pick a random position on a road line (not inside a block)
-      const onXAxis = Math.random() > 0.5;
-      const lineIdx = Math.floor(Math.random() * (GRID + 1));
-      const linePos = -HALF + lineIdx * (BLOCK + ROAD) + BLOCK / 2;
-      const along = (Math.random() - 0.5) * (GRID * (BLOCK + ROAD) - 4);
+  _placeTaxis() {
+    // Yellow "taxi" boxes parked on the sides of roads
+    const taxiBody = new THREE.BoxGeometry(2, 1, 4.2);
+    const taxiMat = new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.5, metalness: 0.4 });
+    const roofMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.5 });
 
-      const coin = new THREE.Mesh(coinGeo, coinMat);
-      if (onXAxis) {
-        coin.position.set(along, 1.0, linePos);
-      } else {
-        coin.position.set(linePos, 1.0, along);
-      }
-      coin.rotation.x = Math.PI / 2;
-      coin.userData.collected = false;
-      coin.userData.spinPhase = Math.random() * Math.PI * 2;
-      this.scene.add(coin);
-      this.coins.push(coin);
+    for (let i = 0; i < 18; i++) {
+      const grp = new THREE.Group();
+      const body = new THREE.Mesh(taxiBody, taxiMat);
+      body.position.y = 0.7;
+      body.castShadow = true;
+      grp.add(body);
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.7, 2.0), roofMat);
+      roof.position.y = 1.5;
+      roof.position.z = -0.2;
+      grp.add(roof);
+
+      // Place along roads (avoid building blocks)
+      let x, z;
+      let tries = 0;
+      do {
+        x = -HALF + Math.random() * (GRID * TILE);
+        z = -HALF + Math.random() * (GRID * TILE);
+        tries++;
+      } while (this._isInBuilding(x, z) && tries < 10);
+
+      grp.position.set(x, 0, z);
+      grp.rotation.y = Math.random() * Math.PI * 2;
+      this.scene.add(grp);
+      this.taxis.push(grp);
+
+      // Collider so you can bump into taxis
+      this.colliders.push({
+        x, z, half: 2.2,
+        minX: x - 2.2, maxX: x + 2.2,
+        minZ: z - 2.2, maxZ: z + 2.2,
+      });
     }
   }
 
-  _buildBillboards() {
-    // Three big billboards around the city showing the supercar art
-    const texLoader = new THREE.TextureLoader();
-    const imgs = ['/car-rolls.jpg', '/car-orange.jpg', '/car-lambo.jpg'];
-    const spots = [
-      { x: -HALF + 6, z: 0, ry: Math.PI / 2 },
-      { x: 0, z: -HALF + 6, ry: 0 },
-      { x: HALF - 6, z: 0, ry: -Math.PI / 2 }
-    ];
-    imgs.forEach((src, i) => {
-      const tex = texLoader.load(src);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
-      const bill = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), mat);
-      bill.position.set(spots[i].x, 8, spots[i].z);
-      bill.rotation.y = spots[i].ry;
-      this.scene.add(bill);
+  _isInBuilding(x, z) {
+    for (const c of this.colliders) {
+      if (x > c.minX && x < c.maxX && z > c.minZ && z < c.maxZ) return true;
+    }
+    return false;
+  }
 
-      // Glowing frame
-      const frame = new THREE.Mesh(
-        new THREE.BoxGeometry(10.4, 5.4, 0.1),
-        new THREE.MeshBasicMaterial({ color: 0x05d9e8 })
-      );
-      frame.position.copy(bill.position);
-      frame.position.y -= 0.05;
-      frame.rotation.y = spots[i].ry;
-      this.scene.add(frame);
-
-      // Posts
-      for (const sx of [-4, 4]) {
-        const post = new THREE.Mesh(
-          new THREE.BoxGeometry(0.4, 8, 0.4),
-          new THREE.MeshStandardMaterial({ color: 0x2a2a3a, metalness: 0.6, roughness: 0.4 })
-        );
-        const lx = Math.cos(spots[i].ry) * sx;
-        const lz = -Math.sin(spots[i].ry) * sx;
-        post.position.set(spots[i].x + lx, 4, spots[i].z + lz);
-        this.scene.add(post);
-      }
-
-      this.billboards.push(bill);
-    });
+  // ===== Checkpoints — a ring road around the perimeter, with rings =====
+  _defineCheckpoints() {
+    // Pick 8 checkpoint positions around the perimeter of the road grid
+    const r = HALF - TILE;     // just inside the outer ring of road
+    const cpCount = 8;
+    for (let i = 0; i < cpCount; i++) {
+      const a = (i / cpCount) * Math.PI * 2;
+      const x = Math.cos(a) * r;
+      const z = Math.sin(a) * r;
+      // Visual: glowing torus ring standing on the road
+      const ringGeo = new THREE.TorusGeometry(2.5, 0.35, 12, 32);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: i === 0 ? 0x00ff88 : 0xffd23f,
+        transparent: true, opacity: 0.9, side: THREE.DoubleSide
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.position.set(x, 0, z);
+      ring.rotation.x = Math.PI / 2;  // lie flat on the road? or stand?
+      // Stand the ring upright, facing along the road direction
+      ring.rotation.x = 0;
+      ring.rotation.y = -a + Math.PI / 2;
+      ring.userData.index = i;
+      ring.userData.hit = false;
+      this.scene.add(ring);
+      this.checkpoints.push({ x, z, ring, index: i });
+    }
+    // The race direction: counter-clockwise (matches the angle increment)
+    this.nextCheckpoint = 0;
   }
 
   update(dt, t) {
-    // Spin coins
-    for (const c of this.coins) {
-      if (c.userData.collected) continue;
-      c.rotation.z = t * 2 + c.userData.spinPhase;
-      c.position.y = 1.0 + Math.sin(t * 3 + c.userData.spinPhase) * 0.15;
+    // Animate checkpoints
+    this.checkpoints.forEach((cp, i) => {
+      const isNext = i === this.nextCheckpoint;
+      const ring = cp.ring;
+      ring.material.opacity = isNext ? 0.6 + Math.sin(t * 5) * 0.3 : 0.35;
+      ring.rotation.y += dt * (isNext ? 1.5 : 0.3);
+      ring.scale.setScalar(isNext ? 1.0 + Math.sin(t * 5) * 0.08 : 1.0);
+    });
+
+    // Palms sway
+    this.palms.forEach((p, i) => {
+      p.children[0].rotation.z = Math.sin(t * 1.5 + i) * 0.04;
+    });
+  }
+
+  // ===== Collision: returns corrected position & velocity reflection =====
+  resolveCollision(pos, radius = 1.5) {
+    let hit = false;
+    for (const c of this.colliders) {
+      // Player is at (pos.x, pos.z). Building is a square box at (c.x, c.z) with half-size c.half.
+      const dx = pos.x - c.x;
+      const dz = pos.z - c.z;
+      const closestX = c.x + Math.max(-c.half, Math.min(c.half, dx));
+      const closestZ = c.z + Math.max(-c.half, Math.min(c.half, dz));
+      const distX = pos.x - closestX;
+      const distZ = pos.z - closestZ;
+      const distSq = distX * distX + distZ * distZ;
+      if (distSq < radius * radius) {
+        const dist = Math.sqrt(distSq) || 0.0001;
+        const push = (radius - dist) / dist;
+        pos.x += distX * push;
+        pos.z += distZ * push;
+        hit = true;
+      }
     }
+    return hit;
   }
 }
 
 export const CITY_HALF = HALF;
-export const CITY_BLOCK = BLOCK;
-export const CITY_ROAD = ROAD;
+export const CITY_TILE = TILE;
+export const CITY_GRID = GRID;
