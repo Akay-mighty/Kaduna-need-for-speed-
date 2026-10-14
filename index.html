@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0a0a1f" />
+  <title>Neon Drive 3D — A Vercel Three.js Driving Game</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800;900&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #050514; color: #fff; font-family: 'Rajdhani', sans-serif; }
+    #app { position: fixed; inset: 0; }
+    canvas { display: block; width: 100%; height: 100%; }
+
+    /* ===== Loader ===== */
+    #loader {
+      position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(circle at center, #1a1a3a 0%, #050514 100%);
+      transition: opacity .6s ease, visibility .6s ease;
+    }
+    #loader.hidden { opacity: 0; visibility: hidden; }
+    .loader-inner { text-align: center; }
+    .loader-inner h1 {
+      font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: clamp(2rem, 6vw, 4rem);
+      letter-spacing: .2em; background: linear-gradient(90deg, #ff2a6d, #05d9e8, #d1f7ff);
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 30px rgba(255, 42, 109, .4);
+    }
+    .loader-inner p { margin-top: .8rem; color: #8aa0c0; letter-spacing: .3em; font-size: .9rem; text-transform: uppercase; }
+    .loader-bar { margin-top: 2rem; width: 280px; max-width: 80vw; height: 4px; background: #1a1a3a; border-radius: 4px; overflow: hidden; }
+    .loader-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #ff2a6d, #05d9e8); transition: width .3s ease; box-shadow: 0 0 12px #05d9e8; }
+    .loader-pct { margin-top: .8rem; font-family: 'Orbitron', sans-serif; font-size: .8rem; color: #05d9e8; }
+
+    /* ===== Car Select ===== */
+    #car-select {
+      position: fixed; inset: 0; z-index: 90; display: none; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #0a0a1f 0%, #1a0a2e 50%, #050514 100%);
+      flex-direction: column; padding: 1rem;
+    }
+    #car-select.active { display: flex; }
+    .select-title { font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: clamp(1.5rem, 4vw, 2.5rem); letter-spacing: .15em; margin-bottom: .5rem; text-align: center; background: linear-gradient(90deg, #ff2a6d, #05d9e8); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .select-sub { color: #8aa0c0; letter-spacing: .2em; text-transform: uppercase; font-size: .8rem; margin-bottom: 2rem; text-align: center; }
+    .car-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.2rem; max-width: 900px; width: 100%; }
+    .car-card {
+      background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px;
+      padding: 1.2rem; cursor: pointer; transition: all .25s ease; position: relative; overflow: hidden;
+    }
+    .car-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, transparent, rgba(5,217,232,0.08)); opacity: 0; transition: opacity .25s; }
+    .car-card:hover { border-color: #05d9e8; transform: translateY(-4px); box-shadow: 0 12px 40px rgba(5,217,232,0.15); }
+    .car-card:hover::before { opacity: 1; }
+    .car-card img { width: 100%; height: 130px; object-fit: contain; filter: drop-shadow(0 10px 20px rgba(0,0,0,.6)); }
+    .car-card h3 { font-family: 'Orbitron', sans-serif; font-size: 1.1rem; margin-top: .8rem; letter-spacing: .05em; }
+    .car-card .stats { display: flex; gap: .8rem; margin-top: .6rem; font-size: .75rem; color: #8aa0c0; }
+    .car-card .stat { flex: 1; }
+    .car-card .stat-bar { height: 3px; background: #2a2a4a; border-radius: 2px; margin-top: .25rem; overflow: hidden; }
+    .car-card .stat-bar > div { height: 100%; background: linear-gradient(90deg, #ff2a6d, #05d9e8); }
+    .car-card .tag { position: absolute; top: .6rem; right: .6rem; font-size: .65rem; padding: .15rem .5rem; background: rgba(255,42,109,.2); color: #ff2a6d; border: 1px solid rgba(255,42,109,.4); border-radius: 4px; letter-spacing: .1em; text-transform: uppercase; }
+
+    /* ===== HUD ===== */
+    #hud { position: fixed; inset: 0; z-index: 80; pointer-events: none; display: none; }
+    #hud.active { display: block; }
+
+    .hud-corner {
+      position: absolute; padding: 1rem 1.2rem; font-family: 'Orbitron', sans-serif;
+      background: linear-gradient(135deg, rgba(10,10,31,.85), rgba(10,10,31,.4));
+      border: 1px solid rgba(5,217,232,.3); border-radius: 8px; backdrop-filter: blur(6px);
+      box-shadow: 0 0 20px rgba(5,217,232,.1), inset 0 0 20px rgba(5,217,232,.05);
+    }
+    .hud-tl { top: 1rem; left: 1rem; }
+    .hud-tr { top: 1rem; right: 1rem; text-align: right; }
+    .hud-bl { bottom: 1rem; left: 1rem; }
+    .hud-br { bottom: 1rem; right: 1rem; text-align: right; }
+
+    .hud-label { font-size: .7rem; letter-spacing: .2em; color: #05d9e8; text-transform: uppercase; }
+    .hud-value { font-size: 1.4rem; font-weight: 800; color: #fff; text-shadow: 0 0 10px rgba(5,217,232,.6); }
+    .hud-value.big { font-size: 2.2rem; }
+    .hud-sub { font-size: .75rem; color: #8aa0c0; letter-spacing: .1em; }
+
+    .speedo { display: flex; align-items: baseline; gap: .3rem; }
+    .speedo .unit { font-size: .9rem; color: #05d9e8; }
+
+    .minimap {
+      position: absolute; bottom: 1rem; left: 50%; transform: translateX(-50%);
+      width: 140px; height: 140px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(10,10,31,.85) 0%, rgba(10,10,31,.4) 70%, transparent 100%);
+      border: 2px solid rgba(5,217,232,.4); box-shadow: 0 0 30px rgba(5,217,232,.15), inset 0 0 20px rgba(5,217,232,.1);
+      overflow: hidden;
+    }
+    .minimap canvas { width: 100%; height: 100%; }
+    .minimap-label { position: absolute; top: -22px; left: 50%; transform: translateX(-50%); font-family: 'Orbitron', sans-serif; font-size: .65rem; letter-spacing: .3em; color: #05d9e8; }
+
+    /* ===== Mission banner ===== */
+    #mission {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 85;
+      pointer-events: none; opacity: 0; transition: opacity .4s ease;
+      text-align: center; font-family: 'Orbitron', sans-serif;
+    }
+    #mission.show { opacity: 1; }
+    #mission .m-tag { font-size: .75rem; letter-spacing: .4em; color: #ff2a6d; text-transform: uppercase; }
+    #mission .m-title { font-size: clamp(1.4rem, 4vw, 2.4rem); font-weight: 900; margin-top: .4rem; color: #fff; text-shadow: 0 0 20px rgba(5,217,232,.6); }
+
+    /* ===== Controls hint ===== */
+    #controls-hint {
+      position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); z-index: 70;
+      background: rgba(10,10,31,.7); border: 1px solid rgba(255,255,255,.1); border-radius: 6px;
+      padding: .5rem 1rem; font-size: .75rem; letter-spacing: .1em; color: #8aa0c0;
+      backdrop-filter: blur(6px); pointer-events: none; opacity: .8; display: none;
+    }
+    #controls-hint.active { display: block; }
+    #controls-hint kbd { display: inline-block; padding: .1rem .4rem; margin: 0 .15rem; background: #1a1a3a; border: 1px solid rgba(5,217,232,.3); border-radius: 3px; color: #05d9e8; font-family: 'Orbitron', sans-serif; font-size: .7rem; }
+
+    /* Mobile touch controls */
+    #touch { position: fixed; inset: 0; z-index: 75; pointer-events: none; display: none; }
+    #touch.active { display: block; }
+    .touch-btn {
+      position: absolute; pointer-events: auto;
+      width: 70px; height: 70px; border-radius: 50%;
+      background: rgba(5,217,232,.15); border: 2px solid rgba(5,217,232,.4);
+      display: flex; align-items: center; justify-content: center;
+      color: #05d9e8; font-size: 1.6rem; font-family: 'Orbitron', sans-serif;
+      backdrop-filter: blur(6px); user-select: none;
+    }
+    .touch-btn:active { background: rgba(5,217,232,.35); }
+    #btn-left { bottom: 5rem; left: 1.5rem; }
+    #btn-right { bottom: 5rem; left: 6rem; }
+    #btn-gas { bottom: 5rem; right: 1.5rem; }
+    #btn-brake { bottom: 5rem; right: 6rem; }
+
+    @media (max-width: 768px) {
+      #touch.active { display: block; }
+      .hud-value.big { font-size: 1.6rem; }
+      .minimap { width: 100px; height: 100px; }
+    }
+
+    .footer-tag {
+      position: fixed; bottom: .3rem; right: .5rem; z-index: 60; font-size: .6rem;
+      color: rgba(255,255,255,.3); letter-spacing: .2em; font-family: 'Orbitron', sans-serif;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- Loader -->
+  <div id="loader">
+    <div class="loader-inner">
+      <h1>NEON DRIVE 3D</h1>
+      <p>Loading city grid…</p>
+      <div class="loader-bar"><div class="loader-bar-fill" id="loader-fill"></div></div>
+      <div class="loader-pct" id="loader-pct">0%</div>
+    </div>
+  </div>
+
+  <!-- Car Select -->
+  <div id="car-select">
+    <div class="select-title">CHOOSE YOUR RIDE</div>
+    <div class="select-sub">Three legends. One neon city. Pick one.</div>
+    <div class="car-grid" id="car-grid"></div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div class="hud-corner hud-tl">
+      <div class="hud-label">Mission</div>
+      <div class="hud-value" style="font-size:1rem" id="mission-name">Free Drive</div>
+      <div class="hud-sub" id="mission-sub">Explore the neon grid</div>
+    </div>
+    <div class="hud-corner hud-tr">
+      <div class="hud-label">Score</div>
+      <div class="hud-value" id="score">0</div>
+      <div class="hud-sub">Coins: <span id="coins">0</span> / <span id="coins-total">0</span></div>
+    </div>
+    <div class="hud-corner hud-bl">
+      <div class="hud-label">Gear</div>
+      <div class="hud-value" id="gear">N</div>
+      <div class="hud-sub" id="rpm">0 RPM</div>
+    </div>
+    <div class="hud-corner hud-br">
+      <div class="hud-label">Speed</div>
+      <div class="hud-value big speedo"><span id="speed">0</span><span class="unit">KM/H</span></div>
+      <div class="hud-sub" id="distance">0 m driven</div>
+    </div>
+    <div class="minimap">
+      <div class="minimap-label">RADAR</div>
+      <canvas id="minimap-canvas" width="140" height="140"></canvas>
+    </div>
+  </div>
+
+  <!-- Mission banner -->
+  <div id="mission">
+    <div class="m-tag" id="mission-tag">Objective</div>
+    <div class="m-title" id="mission-title">— —</div>
+  </div>
+
+  <!-- Controls hint -->
+  <div id="controls-hint">
+    <kbd>W</kbd>/<kbd>↑</kbd> Gas &nbsp; <kbd>S</kbd>/<kbd>↓</kbd> Brake &nbsp; <kbd>A</kbd>/<kbd>←</kbd> Left &nbsp; <kbd>D</kbd>/<kbd>→</kbd> Right &nbsp; <kbd>SPACE</kbd> Drift &nbsp; <kbd>C</kbd> Camera
+  </div>
+
+  <!-- Touch controls (mobile) -->
+  <div id="touch">
+    <div class="touch-btn" id="btn-left">◀</div>
+    <div class="touch-btn" id="btn-right">▶</div>
+    <div class="touch-btn" id="btn-gas">⛽</div>
+    <div class="touch-btn" id="btn-brake">■</div>
+  </div>
+
+  <div class="footer-tag">NEON DRIVE 3D · VERCEL · THREE.JS</div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

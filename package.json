@@ -1,0 +1,17 @@
+{
+  "name": "neon-drive-3d",
+  "version": "1.0.0",
+  "description": "A Vercel-deployable 3D driving game built with Three.js and Vite. Drive a supercar through a neon NYC-inspired city.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.160.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}
