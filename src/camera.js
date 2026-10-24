@@ -37,10 +37,17 @@ export class ChaseCamera {
     const fwd = player.getForward();
     const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
 
+    // Speed-based zoom-out (slop-newyork pattern): camera pulls back as speed
+    // increases, gives a sense of velocity. Speed factor 0..1, distance grows
+    // by up to 25% at top speed.
+    const speedFactor = Math.min(1, Math.abs(player.speed) / 55);
+    const speedZoom = 1 + speedFactor * 0.25;
+
     let offset, lookHeight;
     if (MODES[this.mode] === 'chase') {
       // Standard third-person chase cam: behind + above
-      offset = fwd.clone().multiplyScalar(-this.distance).add(new THREE.Vector3(0, this.height, 0));
+      offset = fwd.clone().multiplyScalar(-this.distance * speedZoom)
+              .add(new THREE.Vector3(0, this.height, 0));
       lookHeight = 1.4;
     } else if (MODES[this.mode] === 'hood') {
       // Close to the hood, looking forward
@@ -48,7 +55,8 @@ export class ChaseCamera {
       lookHeight = 2.2;
     } else {
       // High angle — slightly top-down, good for seeing the track
-      offset = fwd.clone().multiplyScalar(-this.distance * 0.6).add(new THREE.Vector3(0, this.height * 2, 0));
+      offset = fwd.clone().multiplyScalar(-this.distance * 0.6)
+              .add(new THREE.Vector3(0, this.height * 2, 0));
       lookHeight = 0.8;
     }
 
@@ -61,19 +69,17 @@ export class ChaseCamera {
 
     const look = player.pos.clone().add(new THREE.Vector3(0, lookHeight, 0))
                   .add(fwd.clone().multiplyScalar(5));
-    // Clamp look-at target above ground
     look.y = Math.max(look.y, 0.5);
 
-    // Smooth follow (slower lerp = smoother but slightly less responsive)
-    const lerp = 1 - Math.pow(0.003, dt);   // was 0.001 — slightly snappier
+    // Smooth follow (frame-rate independent)
+    const lerp = 1 - Math.pow(0.003, dt);
     this.curPos.lerp(ideal, lerp);
     this.camera.position.copy(this.curPos);
     this.curLook.lerp(look, lerp);
     this.camera.lookAt(this.curLook);
 
-    // FOV kick with speed (capped to avoid fisheye)
-    const speedFactor = Math.min(1, Math.abs(player.speed) / 60);
-    const targetFov = 65 + speedFactor * 10;
+    // FOV kick with speed (capped)
+    const targetFov = 65 + speedFactor * 12;
     this.fov += (targetFov - this.fov) * Math.min(1, dt * 4);
     this.camera.fov = this.fov;
     this.camera.updateProjectionMatrix();

@@ -377,15 +377,17 @@ export class City {
         this.scene.add(seg);
         this.barriers.push(seg);
 
-        // Collider: use a CIRCLE (orientation-independent) instead of an
-        // axis-aligned box. The barrier mesh is rotated to follow the track,
-        // so an AABB would be incorrectly oriented on curves and cause false
-        // collisions that trap the player. A circle of radius len/2 + bT/2
-        // approximates the segment well for collision purposes.
+        // Collider: store as a line segment (point + direction + length).
+        // Circle-vs-line-segment is the correct collision shape for a thin
+        // rotated barrier box — much tighter than a circle of radius=len/2
+        // (which would extend into the road on straight segments) or an
+        // axis-aligned box (which would be incorrectly oriented on curves).
         this.colliders.push({
-          type: 'circle',
-          x: mx, z: mz,
-          r: len / 2 + bT / 2 + 0.3,   // segment length half + barrier thickness half + small pad
+          type: 'segment',
+          x: mx, z: mz,                  // segment midpoint
+          dx: dx / len, dz: dz / len,    // unit direction
+          halfLen: (len + 0.1) / 2,       // half length along direction
+          halfThick: bT / 2 + 0.3,        // half thickness (perpendicular)
         });
       }
     }
@@ -773,16 +775,46 @@ export class City {
   }
 
   // ===== Collision resolution =====
-  // Returns true if the player penetrated any collider this frame; mutates pos to push out.
-  // Handles two collider types:
+  // Returns { hit, normal } — pushes player out of any penetrated collider.
+  // Three collider types:
   //   - 'box': axis-aligned bounding box (buildings, taxis)
-  //   - 'circle': circle at (x, z) with radius r (barriers — orientation-independent)
+  //   - 'segment': oriented line segment (barriers — proper rotated box shape)
+  //   - 'circle': circle (legacy fallback — unused but kept for compat)
   resolveCollision(pos, radius = 1.5) {
     let hit = false;
     let hitNormal = null;
     for (const c of this.colliders) {
-      if (c.type === 'circle') {
-        // Circle-vs-circle: distance from player center to collider center
+      if (c.type === 'segment') {
+        // Circle vs oriented line segment (capsule shape: segment + radius at ends)
+        // Find closest point on segment to player
+        const px = pos.x - c.x;
+        const pz = pos.z - c.z;
+        // Project onto segment direction, clamped to [-halfLen, +halfLen]
+        let t = px * c.dx + pz * c.dz;
+        t = Math.max(-c.halfLen, Math.min(c.halfLen, t));
+        // Closest point on segment center line
+        const cx = c.x + c.dx * t;
+        const cz = c.z + c.dz * t;
+        const dx = pos.x - cx;
+        const dz = pos.z - cz;
+        const distSq = dx * dx + dz * dz;
+        const sumR = radius + c.halfThick;
+        if (distSq < sumR * sumR) {
+          const dist = Math.sqrt(distSq) || 0.0001;
+          const push = (sumR - dist) / dist;
+          if (dist < 0.0001) {
+            // Player is on the segment center — push perpendicular to segment direction
+            pos.x += -c.dz * sumR;
+            pos.z += c.dx * sumR;
+          } else {
+            pos.x += dx * push;
+            pos.z += dz * push;
+          }
+          hit = true;
+          hitNormal = new THREE.Vector2(dx, dz).normalize();
+        }
+      } else if (c.type === 'circle') {
+        // Circle-vs-circle (legacy fallback)
         const dx = pos.x - c.x;
         const dz = pos.z - c.z;
         const distSq = dx * dx + dz * dz;
@@ -796,7 +828,7 @@ export class City {
           hitNormal = new THREE.Vector2(dx, dz).normalize();
         }
       } else {
-        // Box (AABB) — closest point on box to player
+        // Box (AABB)
         const cx = Math.max(c.minX, Math.min(c.maxX, pos.x));
         const cz = Math.max(c.minZ, Math.min(c.maxZ, pos.z));
         const dx = pos.x - cx;
@@ -806,7 +838,6 @@ export class City {
           const dist = Math.sqrt(distSq) || 0.0001;
           const push = (radius - dist) / dist;
           if (dist < 0.0001) {
-            // Player center is inside the box — push out along the smallest penetration axis
             const penX = Math.min(pos.x - c.minX, c.maxX - pos.x);
             const penZ = Math.min(pos.z - c.minZ, c.maxZ - pos.z);
             if (penX < penZ) {

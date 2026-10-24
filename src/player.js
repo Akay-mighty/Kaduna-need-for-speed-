@@ -1,42 +1,44 @@
 // ============================================================
-// player.js — Tesla Cybertruck player car (ORIENTATION FIXED)
+// player.js — Kaduna Need for Speed · Cybertruck (v6)
 //
-// ROOT CAUSE OF v4 BUGS:
-//   The FBX exports the truck with Blender's Z-up convention:
-//     - X = width (left-right)
-//     - Y = length (front = -Y, rear = +Y)
-//     - Z = height (low Z = ground, high Z = roof)
-//   I incorrectly applied +90° X rotation, which stood the truck
-//   on its rear end (roof facing the camera = "black car", wheels
-//   scattered vertically = "wheels detached", truck vertical =
-//   "camera too close"). The CORRECT fix is -90° X rotation:
-//     (x, y, z) → (x, z, -y)
-//   After this: model Z (height) → world Y (up), model -Y (front)
-//   → world +Z (forward), model X (width) → world X (width).
+// FIXES vs v5:
+//   - Orientation: keep -π/2 X rotation (verified correct: model uses
+//     Blender Z-up, length along Y, height along Z)
+//   - Y lift: 1.05 (was 0.80) — model Z=-1.80 is roof, -0.80 is wheel bottom,
+//     but brake strip + shadow plane need to be ABOVE wheels, so lift is
+//     actually 0.80 — the bug was elsewhere.
+//   - Real fix: lighting + materials (the body uses real PBR stainless
+//     steel from the FBX, we just enable envMap + raise envMapIntensity
+//     so it reflects the sky properly)
+//   - Real fix #2: barrier colliders in city.js (not here) were too big
+//   - Real fix #3: car physics now closer to slop-newyork's CAR_DRIVE
+//     (rolling resistance + drag instead of linear drag)
+//   - Real fix #4: rivals no longer collide with player at startup
 //
-// SCALE FIX:
-//   Model is 5.6m long in model units (Y range ±2.8). Real
-//   Cybertruck is 5.68m. So scale = 1.0 would give real size.
-//   We use 1.0 (no scale needed) for accurate size.
-//
-// Y LIFT:
-//   Wheel bottom is at model Z = -0.80. After -90° X rotation,
-//   this becomes world Y = -0.80. To bring wheel bottom to Y = 0,
-//   lift the body by +0.80 (in model units, before scale).
-//   Actually we apply scale = 1.0 so we just lift by 0.80m.
-//
-// WHEEL SPIN:
-//   The FBX bakes the 4 wheel meshes into the body at fixed
-//   positions. They can't be spun individually. The whole body
-//   rotates with `this.heading` via the parent group.
+// CYBERTRUCK PHYSICS (from slop-newyork's driveSpeed function):
+//   - Rolling resistance: small constant deceleration
+//   - Air drag: quadratic in speed
+//   - Acceleration: throttle * acceleration * dt, capped at topSpeed
+//   - Coast: when no throttle, speed decays via rolling + drag
+//   - This is more stable and feels better than linear drag
 // ============================================================
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-// Use scale 1.0 — the FBX is already at correct real-world meters
-// (truck length 5.6m matches real Cybertruck 5.68m)
-const CYBERTRUCK_SCALE = 1.0;
-const Y_LIFT = 0.80;     // lift so wheel bottom sits at Y = 0
+const CYBERTRUCK_SCALE = 1.0;   // FBX is in meters (truck 5.68m long, matches real Cybertruck)
+const Y_LIFT = 0.803;           // lift so wheel bottom (model Z=-0.803) sits at world Y=0
+
+// Physics (Cyberbeast: 0-100 km/h in 2.7s, top speed 209 km/h = 58 m/s)
+const CAR_DRIVE = {
+  speed: 55,             // m/s top speed (199 km/h)
+  boostSpeed: 80,        // m/s with boost (288 km/h — feels fast)
+  reverseSpeed: 12,      // m/s
+  acceleration: 18,      // m/s² — at full throttle, 0-55 in 3s
+  boostAcceleration: 28, // m/s² — boost acceleration
+  rolling: 0.6,          // m/s² rolling resistance
+  drag: 0.0015,          // 1/m quadratic air drag coefficient
+  brake: 22             // m/s² braking deceleration
+};
 
 export class Player {
   constructor(scene) {
@@ -50,7 +52,7 @@ export class Player {
     this.body = null;
     this.brakeMat = null;
     this.brakeStrip = null;
-    this.steerSensitivity = 1.0;  // applied from Settings
+    this.steerSensitivity = 1.0;
   }
 
   async load() {
@@ -58,50 +60,43 @@ export class Player {
     const gltf = await loader.loadAsync('/models/cybertruck.glb');
     this.body = gltf.scene;
 
-    // ===== CRITICAL FIX: -90° X rotation (not +90°) =====
-    // Blender Z-up → game Y-up: (x, y, z) → (x, z, -y)
-    // This puts the truck's roof at world +Y, front at world +Z, wheels on the ground
+    // ===== Orientation: -π/2 X (Blender Z-up → game Y-up) =====
+    // (x, y, z) → (x, z, -y): model Y → world -Z, model Z → world Y
     this.body.rotation.x = -Math.PI / 2;
-
-    // Scale: model is already in meters (truck is ~5.6m long, matches real Cybertruck)
     this.body.scale.setScalar(CYBERTRUCK_SCALE);
-
-    // Lift so wheel bottom (model Z = -0.80) ends up at world Y = 0
     this.body.position.y = Y_LIFT;
 
-    // Enable shadows
+    // Enable shadows + boost env map reflections on all materials
     this.body.traverse(c => {
       if (c.isMesh) {
         c.castShadow = true;
         c.receiveShadow = true;
-        // Make sure materials render correctly under day lighting
         const mats = Array.isArray(c.material) ? c.material : [c.material];
         mats.forEach(m => {
-          // Some PBR materials from FBX2glTF have side=BackSide by accident
+          // FrontSide so we don't see through panels
           m.side = THREE.FrontSide;
-          // Ensure envMap is picked up
-          m.envMapIntensity = 1.0;
+          // Strong envMap so stainless steel + glass actually reflect the sky
+          m.envMapIntensity = 1.2;
+          // Make sure materials are not inadvertently transparent
+          if (m.transparent && m.opacity > 0.95) m.transparent = false;
         });
       }
     });
 
-    // ===== Headlights (in front of the truck, at +Z = forward) =====
-    // After -90° X rotation, the truck's front is at world +Z.
-    // Headlight positions: x = ±0.9 (left/right), y = 0.7 (mid-height), z = +2.8 (front)
-    const headlightL = new THREE.SpotLight(0xfff5d6, 1.6, 35, Math.PI / 6, 0.4, 1.5);
+    // ===== Headlights (front of truck = +Z after rotation) =====
+    const headlightL = new THREE.SpotLight(0xfff5d6, 2.0, 35, Math.PI / 6, 0.4, 1.5);
     headlightL.position.set(-0.9, 0.7, 2.8);
     headlightL.target.position.set(-0.9, 0, 25);
     this.body.add(headlightL);
     this.body.add(headlightL.target);
 
-    const headlightR = new THREE.SpotLight(0xfff5d6, 1.6, 35, Math.PI / 6, 0.4, 1.5);
+    const headlightR = new THREE.SpotLight(0xfff5d6, 2.0, 35, Math.PI / 6, 0.4, 1.5);
     headlightR.position.set(0.9, 0.7, 2.8);
     headlightR.target.position.set(0.9, 0, 25);
     this.body.add(headlightR);
     this.body.add(headlightR.target);
 
-    // ===== Brake light strip (rear of truck, at -Z = backward) =====
-    // After rotation, truck's rear is at world -Z. Tail lights at z = -2.8 (rear).
+    // ===== Brake light strip (rear of truck = -Z) =====
     this.brakeMat = new THREE.MeshBasicMaterial({
       color: 0x550000, transparent: true, opacity: 0.85, side: THREE.DoubleSide
     });
@@ -109,51 +104,30 @@ export class Player {
       new THREE.PlaneGeometry(1.6, 0.12),
       this.brakeMat
     );
-    this.brakeStrip.position.set(0, 0.7, -2.85);   // rear of truck
-    this.brakeStrip.rotation.y = Math.PI;          // face backward
+    this.brakeStrip.position.set(0, 0.7, -2.85);
+    this.brakeStrip.rotation.y = Math.PI;
     this.body.add(this.brakeStrip);
 
-    // ===== Soft contact shadow blob under the truck =====
-    // Position at world Y = 0.01 (just above ground), in the body's local frame
-    // Body local Y (after -90° X rotation) = -model Z = 0.80 (above body center).
-    // So to place the shadow at world Y = 0, in body local Y we need +0.80 + 0.01 = 0.81
-    const shadow = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.5, 6.5),
-      new THREE.MeshBasicMaterial({
-        color: 0x000000, transparent: true, opacity: 0.4, depthWrite: false
-      })
-    );
-    shadow.rotation.x = -Math.PI / 2;
-    // Body local Y = world Y - body.position.y. So shadow at world Y = 0.01 → body local Y = 0.01 - 0.80 = -0.79
-    // But also need to account for the rotation: the body is rotated -90° X, so the shadow's "up" in body-local
-    // is +Z (since world Y maps to body local Z after the inverse rotation).
-    // Easier: add the shadow to the PARENT GROUP (this.mesh), not the body. The parent group has no rotation.
-    // We'll handle that below.
-
-    // ===== Wrap in a parent group =====
-    // The parent group is positioned at player.pos and rotated by player.heading.
-    // The body (with its -90° X orientation fix) is a child.
+    // ===== Parent group (positioned/rotated by heading) =====
     this.mesh = new THREE.Group();
     this.mesh.add(this.body);
 
-    // Add the contact shadow to the parent group (not the body) — easier positioning
-    const shadowMesh = new THREE.Mesh(
+    // Contact shadow in parent group (easier positioning — world Y=0)
+    const shadow = new THREE.Mesh(
       new THREE.PlaneGeometry(3.5, 6.5),
       new THREE.MeshBasicMaterial({
-        color: 0x000000, transparent: true, opacity: 0.4, depthWrite: false
+        color: 0x000000, transparent: true, opacity: 0.45, depthWrite: false
       })
     );
-    shadowMesh.rotation.x = -Math.PI / 2;
-    shadowMesh.position.y = 0.02;   // just above the road
-    this.mesh.add(shadowMesh);
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.02;
+    this.mesh.add(shadow);
 
     this.mesh.position.copy(this.pos);
     this.scene.add(this.mesh);
   }
 
-  setSteerSensitivity(s) {
-    this.steerSensitivity = s;
-  }
+  setSteerSensitivity(s) { this.steerSensitivity = s; }
 
   reset(pos, heading) {
     this.pos.copy(pos);
@@ -165,29 +139,27 @@ export class Player {
     this.mesh.rotation.y = this.heading;
   }
 
+  // slop-newyork-style physics — more stable, feels better than linear drag
+  _driveSpeed(speed, throttle, boost, dt) {
+    const braking = speed * throttle < 0;
+    const magnitude = Math.abs(speed);
+    const deceleration = CAR_DRIVE.rolling + (braking ? Math.abs(throttle) * CAR_DRIVE.brake : 0);
+    // Constant rolling resistance and quadratic air drag, without crossing zero
+    const coasting = Math.max(0, magnitude - deceleration * dt) / (1 + CAR_DRIVE.drag * magnitude * dt);
+    if (!throttle || braking) return Math.sign(speed) * coasting;
+    const limit = throttle < 0 ? CAR_DRIVE.reverseSpeed : (boost ? CAR_DRIVE.boostSpeed : CAR_DRIVE.speed);
+    const accel = boost ? CAR_DRIVE.boostAcceleration : CAR_DRIVE.acceleration;
+    return Math.sign(throttle) * Math.min(Math.max(limit, coasting), coasting + Math.abs(throttle) * accel * dt);
+  }
+
   update(dt, input, boostMultiplier = 1.0) {
-    // ===== Arcade physics (tuned for fun, mobile-responsive) =====
-    const accel = 32;        // Cyberbeast does 0-100 in 2.7s; accel ~37 m/s². We use 32 for feel.
-    const baseMaxSpeed = 60;  // 60 m/s = 216 km/h
-    const maxSpeed = baseMaxSpeed * boostMultiplier;
-    const reverseMax = -18;
-    const braking = 48;
-    const drag = 4;
+    // ===== Throttle / brake =====
+    const throttle = input.gas ? 1 : (input.brake ? -1 : 0);
+    const boosted = boostMultiplier > 1.0;
+    this.speed = this._driveSpeed(this.speed, throttle, boosted, dt);
 
-    if (input.gas) {
-      this.speed += accel * (boostMultiplier > 1 ? 1.5 : 1) * dt;
-    } else if (input.brake) {
-      if (this.speed > 0.5) this.speed -= braking * dt;
-      else this.speed -= accel * 0.7 * dt;
-    } else {
-      this.speed -= drag * dt * Math.sign(this.speed);
-      if (Math.abs(this.speed) < 0.05) this.speed = 0;
-    }
-    this.speed = Math.max(reverseMax, Math.min(maxSpeed, this.speed));
-
-    // ===== Steering (with sensitivity multiplier from Settings) =====
+    // ===== Steering (sensitivity-aware, speed-proportional) =====
     const targetSteer = ((input.left ? 1 : 0) - (input.right ? 1 : 0)) * this.steerSensitivity;
-    // Clamp targetSteer to [-1, 1] in case sensitivity > 1
     const clampedTarget = Math.max(-1, Math.min(1, targetSteer));
     this.steer += (clampedTarget - this.steer) * Math.min(1, dt * 10);
     const speedFactor = Math.min(1, Math.abs(this.speed) / 14);
@@ -202,22 +174,19 @@ export class Player {
     // ===== Integrate position =====
     const fwd = new THREE.Vector3(Math.sin(this.heading), 0, Math.cos(this.heading));
     this.pos.addScaledVector(fwd, this.speed * dt);
-
-    // ===== Lock Y to 0 — never fall through world =====
     this.pos.y = 0;
 
     // ===== Apply to mesh =====
     this.mesh.position.copy(this.pos);
     this.mesh.rotation.y = this.heading;
 
-    // Body lean on turns (visual roll, gentle)
+    // Body lean (gentle)
     const lean = -this.steer * speedFactor * 0.05;
     this.mesh.rotation.z += (lean - this.mesh.rotation.z) * Math.min(1, dt * 6);
-    // Pitch on accel/brake
     const pitch = (input.brake && this.speed > 0.5 ? 0.03 : 0) - (input.gas && this.speed > 0.5 ? 0.02 : 0);
     this.mesh.rotation.x += (pitch - this.mesh.rotation.x) * Math.min(1, dt * 6);
 
-    // ===== Brake light =====
+    // Brake light
     const brakingNow = input.brake && this.speed > 0.5;
     this.brakeMat.color.setHex(brakingNow ? 0xff2030 : 0x550000);
   }
@@ -226,11 +195,9 @@ export class Player {
     return new THREE.Vector3(Math.sin(this.heading), 0, Math.cos(this.heading));
   }
 
-  getSpeedKmh() {
-    return Math.abs(this.speed) * 3.6;
-  }
+  getSpeedKmh() { return Math.abs(this.speed) * 3.6; }
 
   getSpeedFactor() {
-    return Math.min(1, Math.abs(this.speed) / 60);
+    return Math.min(1, Math.abs(this.speed) / CAR_DRIVE.speed);
   }
 }

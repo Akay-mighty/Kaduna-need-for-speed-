@@ -28,8 +28,8 @@ export class Rivals {
     this.enabled = false;
   }
 
-  // Spawn at a position behind the player start line, in a 2x2 grid
   spawn(playerStartPos, playerStartHeading) {
+    this._spawnTime = performance.now();
     // Player starts at trackPath[0]. Grid is just behind on the same straight,
     // offset left/right and a few meters back.
     // Player faces +X (heading = π/2). Back is -X. Left is +Z, right is -Z
@@ -45,10 +45,12 @@ export class Rivals {
       { body: 0x2d8a3e, name: 'Green' },    // green
     ];
 
+    // Spread the grid BEHIND the player (negative fwd offset) and slightly to the sides.
+    // Back further (8-12m) so they don't collide with player at start.
     const grid = [
-      { fwd: -5, right:  3 },   // back-left of player
-      { fwd: -5, right: -3 },  // back-right of player
-      { fwd: -9, right:  3 },  // further back-left
+      { fwd: -8, right:  3 },   // back-left of player
+      { fwd: -8, right: -3 },  // back-right of player
+      { fwd: -12, right:  0 }, // further back, centered
     ];
 
     for (let i = 0; i < 3; i++) {
@@ -190,19 +192,21 @@ export class Rivals {
       r.mesh.position.copy(r.pos);
       r.mesh.rotation.y = r.heading;
 
-      // ===== Collision with player =====
-      const pdx = r.pos.x - playerPos.x;
-      const pdz = r.pos.z - playerPos.z;
-      const pdist = Math.sqrt(pdx * pdx + pdz * pdz);
-      const minDist = playerRadius + 2.5;
-      if (pdist < minDist && pdist > 0.001) {
-        const push = (minDist - pdist) / pdist;
-        r.pos.x += pdx * push * 0.5;
-        r.pos.z += pdz * push * 0.5;
-        playerPos.x -= pdx * push * 0.5;
-        playerPos.z -= pdz * push * 0.5;
-        r.speed *= 0.7;
-        playerHit = true;
+      // ===== Collision with player (disabled for first 3s after race start) =====
+      if (this._spawnTime && performance.now() - this._spawnTime > 3000) {
+        const pdx = r.pos.x - playerPos.x;
+        const pdz = r.pos.z - playerPos.z;
+        const pdist = Math.sqrt(pdx * pdx + pdz * pdz);
+        const minDist = playerRadius + 2.5;
+        if (pdist < minDist && pdist > 0.001) {
+          const push = (minDist - pdist) / pdist;
+          r.pos.x += pdx * push * 0.5;
+          r.pos.z += pdz * push * 0.5;
+          playerPos.x -= pdx * push * 0.5;
+          playerPos.z -= pdz * push * 0.5;
+          r.speed *= 0.7;
+          playerHit = true;
+        }
       }
     }
 

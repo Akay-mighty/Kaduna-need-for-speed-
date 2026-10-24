@@ -20,22 +20,23 @@ import { BoostPads } from './boostpads.js';
 import { Settings, SettingsUI } from './settings.js';
 
 // Day/night cycle: 4 keyframes — dawn, noon, dusk, midnight
+// Tuned brighter than v5 so PBR materials (Cybertruck stainless steel) actually reflect light.
 const TOD_KEYFRAMES = [
   { t: 0.00, name: 'DAWN',  icon: '🌅',
     top: 0xffa080, mid: 0xffd2a0, bot: 0xf0c0a0,
-    sun: 0xffd2a0, sunI: 0.7, hemiSky: 0xffcfa0, hemiGround: 0xc8a878, hemiI: 0.5,
+    sun: 0xffd2a0, sunI: 1.6, hemiSky: 0xffcfa0, hemiGround: 0xc8a878, hemiI: 0.7,
     fog: 0xf0c8a8, lampOn: false },
   { t: 0.25, name: 'DAY',   icon: '☀',
     top: 0x2a6fc4, mid: 0x9ec8e8, bot: 0xf0e0c0,
-    sun: 0xfff2d6, sunI: 1.6, hemiSky: 0xc8e0ff, hemiGround: 0xc8a878, hemiI: 0.55,
+    sun: 0xfff2d6, sunI: 3.0, hemiSky: 0xc8e0ff, hemiGround: 0xc8a878, hemiI: 1.0,
     fog: 0xc8d8e0, lampOn: false },
   { t: 0.50, name: 'DUSK',  icon: '🌆',
     top: 0x404080, mid: 0xff7040, bot: 0xffa050,
-    sun: 0xff8040, sunI: 1.0, hemiSky: 0xffa070, hemiGround: 0x805040, hemiI: 0.5,
+    sun: 0xff8040, sunI: 1.8, hemiSky: 0xffa070, hemiGround: 0x805040, hemiI: 0.7,
     fog: 0xffa070, lampOn: false },
   { t: 0.75, name: 'NIGHT', icon: '🌙',
     top: 0x05081a, mid: 0x0a1438, bot: 0x102040,
-    sun: 0x6080ff, sunI: 0.3, hemiSky: 0x202040, hemiGround: 0x101020, hemiI: 0.25,
+    sun: 0x6080ff, sunI: 0.4, hemiSky: 0x202040, hemiGround: 0x101020, hemiI: 0.3,
     fog: 0x0a1438, lampOn: true },
 ];
 
@@ -101,11 +102,14 @@ export class Game {
     this.renderer.toneMappingExposure = 1.15;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-    // ===== Lights — created here, intensity updated by day/night =====
-    this.hemi = new THREE.HemisphereLight(0xc8e0ff, 0xc8a878, 0.55);
+    // ===== Lights — bright midday (close to slop-newyork midday preset) =====
+    // Sun 6.6 / hemi 1.58 in slop-newyork; we use lower because we don't have
+    // a physically-based pipeline, but bump from v5's 1.6 → 3.0 so PBR
+    // stainless steel actually shines.
+    this.hemi = new THREE.HemisphereLight(0xc8e0ff, 0xc8a878, 1.0);
     this.scene.add(this.hemi);
 
-    this.sun = new THREE.DirectionalLight(0xfff2d6, 1.6);
+    this.sun = new THREE.DirectionalLight(0xfff2d6, 3.0);
     this.sun.position.set(80, 120, 40);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -119,8 +123,9 @@ export class Game {
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
 
-    this.fill = new THREE.DirectionalLight(0xffd2a0, 0.25);
-    this.fill.position.set(-60, 30, -40);
+    // Stronger warm fill from opposite side
+    this.fill = new THREE.DirectionalLight(0xffd2a0, 0.6);
+    this.fill.position.set(-60, 50, -40);
     this.scene.add(this.fill);
 
     // Moon (for night — a soft blue directional from the opposite side)
@@ -558,22 +563,22 @@ export class Game {
       // ===== Update player (with boost multiplier) =====
       this.player.update(dt, this.input, this.boostPads.getSpeedMultiplier());
 
-      // ===== Collision: buildings + barriers =====
-      const col = this.city.resolveCollision(this.player.pos, 2.0);
+      // ===== Collision: buildings + barriers (radius 1.4 = half truck width) =====
+      const col = this.city.resolveCollision(this.player.pos, 1.4);
       if (col.hit) {
-        this.player.speed *= 0.6;
+        this.player.speed *= 0.8;  // gentle speed bleed on impact
       }
 
       // ===== World bounds =====
       if (this.city.clampToTrack(this.player.pos)) {
-        this.player.speed *= 0.5;
+        this.player.speed *= 0.7;
       }
 
       // ===== Update AI rivals =====
-      const rivalHit = this.rivals.update(dt, this.player.pos, 2.0);
+      const rivalHit = this.rivals.update(dt, this.player.pos, 1.4);
       if (rivalHit) {
-        this.player.speed *= 0.8;
-        this.audio.chime(220, 0.08);  // bump sound
+        this.player.speed *= 0.85;
+        this.audio.chime(220, 0.08);
       }
 
       // ===== Re-apply position after all collisions =====
