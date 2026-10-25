@@ -91,9 +91,16 @@ export class Game {
     this.camera.lookAt(0, 0, 0);
 
     // ===== Renderer =====
+    // preserveDrawingBuffer: true so we can take screenshots / debug canvas state
+    // (also helps with some mobile WebGL contexts that lose the buffer between frames)
     const canvas = document.createElement('canvas');
     document.getElementById('app').appendChild(canvas);
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      powerPreference: 'high-performance',
+      preserveDrawingBuffer: true,
+    });
     this._applyGraphicsQuality();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
@@ -216,17 +223,19 @@ export class Game {
   }
 
   // ===== Build an environment map for PBR material reflections =====
-  // Uses PMREMGenerator on the scene's gradient sky. The result is a
-  // pre-filtered env map that gives metallic surfaces (Cybertruck stainless
-  // steel, glass, etc.) something to reflect — fixes the "black car" issue.
+  // Uses PMREMGenerator on the gradient sky. CRITICAL: only set
+  // scene.environment if the PMREM render succeeds and produces a valid
+  // texture. If PMREM throws or returns null, we DON'T set scene.environment
+  // — the materials will use the lights only (no reflections) but the scene
+  // will still render correctly. (Setting scene.environment to a broken
+  // texture can cause the renderer to silently produce a blank frame,
+  // which is the bug we're guarding against.)
   _buildEnvMap() {
+    let envMap = null;
     try {
       const pmrem = new THREE.PMREMGenerator(this.renderer);
-      // Render the existing sky shader into a 256x256 cube target, then prefilter
       pmrem.compileEquirectangularShader();
-      // Use the sky mesh as the source — render it as an equirectangular texture
       const tempScene = new THREE.Scene();
-      // Add a gradient backdrop that matches our sky colors
       const skyGeo = new THREE.SphereGeometry(100, 32, 16);
       const skyMat = new THREE.ShaderMaterial({
         side: THREE.BackSide,
@@ -262,14 +271,21 @@ export class Game {
       const tempSky = new THREE.Mesh(skyGeo, skyMat);
       tempScene.add(tempSky);
       const rt = pmrem.fromScene(tempScene, 0, 0.1, 100);
-      this.envMap = rt.texture;
-      this.scene.environment = this.envMap;
+      if (rt && rt.texture) {
+        envMap = rt.texture;
+      }
       // Cleanup
       tempSky.geometry.dispose();
       skyMat.dispose();
       pmrem.dispose();
     } catch (e) {
-      console.warn('Env map build failed, materials will be less reflective', e);
+      console.warn('Env map build failed, materials will use lights only', e);
+      envMap = null;
+    }
+    // Only set scene.environment if we got a valid texture
+    if (envMap) {
+      this.envMap = envMap;
+      this.scene.environment = envMap;
     }
   }
 
@@ -541,7 +557,7 @@ export class Game {
     const settingsOpen = this.settingsUI && this.settingsUI.isVisible();
     if (settingsOpen) {
       // Still render the scene so it doesn't freeze visually, but don't update game state
-      this.renderer.render(this.scene, this.camera);
+      try { this.renderer.render(this.scene, this.camera); } catch (e) {}
       return;
     }
 
@@ -653,7 +669,40 @@ export class Game {
       }
     }
 
-    this.renderer.render(this.scene, this.camera);
+    // ===== Robust render: catch any WebGL error so the loop keeps running =====
+    // NaN check on camera position — if it goes NaN (e.g. race start glitch),
+    // reset to a safe spot above the player so we don't render garbage frames.
+    if (!isFinite(this.camera.position.x) || !isFinite(this.camera.position.y) || !isFinite(this.camera.position.z)) {
+      if (this.player) {
+        const fwd = this.player.getForward();
+        this.camera.position.copy(this.player.pos).addScaledVector(fwd, -14).add(new THREE.Vector3(0, 6, 0));
+        this.camera.lookAt(this.player.pos);
+      }
+    }
+    // Safety: if camera Y goes below 1, force it back up (camera stuck under road)
+    if (this.camera.position.y < 1) {
+      this.camera.position.y = 6;
+      if (this.player) this.camera.lookAt(this.player.pos);
+    }
+    // Safety: if camera is too far from player (lost tracking), snap back
+    if (this.player && this.camera.position.distanceTo(this.player.pos) > 100) {
+      const fwd = this.player.getForward();
+      this.camera.position.copy(this.player.pos).addScaledVector(fwd, -14).add(new THREE.Vector3(0, 6, 0));
+      this.camera.lookAt(this.player.pos);
+      if (this.cam) {
+        this.cam.curPos.copy(this.camera.position);
+        this.cam.curLook.copy(this.player.pos);
+      }
+    }
+    try {
+      this.renderer.render(this.scene, this.camera);
+    } catch (e) {
+      // Don't let a render error kill the loop — log once and continue
+      if (!this._renderErrorLogged) {
+        console.error('Render error:', e);
+        this._renderErrorLogged = true;
+      }
+    }
   }
 
   _updateHUD(now) {

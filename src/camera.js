@@ -74,8 +74,15 @@ export class ChaseCamera {
     // Smooth follow (frame-rate independent)
     const lerp = 1 - Math.pow(0.003, dt);
     this.curPos.lerp(ideal, lerp);
+    // Guard against NaN — if curPos goes invalid, snap to ideal
+    if (!isFinite(this.curPos.x) || !isFinite(this.curPos.y) || !isFinite(this.curPos.z)) {
+      this.curPos.copy(ideal);
+    }
     this.camera.position.copy(this.curPos);
     this.curLook.lerp(look, lerp);
+    if (!isFinite(this.curLook.x) || !isFinite(this.curLook.y) || !isFinite(this.curLook.z)) {
+      this.curLook.copy(look);
+    }
     this.camera.lookAt(this.curLook);
 
     // FOV kick with speed (capped)

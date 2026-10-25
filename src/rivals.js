@@ -193,7 +193,8 @@ export class Rivals {
       r.mesh.rotation.y = r.heading;
 
       // ===== Collision with player (disabled for first 3s after race start) =====
-      if (this._spawnTime && performance.now() - this._spawnTime > 3000) {
+      // The _spawnTime check guards against undefined (in case spawn() wasn't called)
+      if (this._spawnTime && (performance.now() - this._spawnTime) > 3000) {
         const pdx = r.pos.x - playerPos.x;
         const pdz = r.pos.z - playerPos.z;
         const pdist = Math.sqrt(pdx * pdx + pdz * pdz);

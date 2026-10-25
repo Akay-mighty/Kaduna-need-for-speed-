@@ -395,16 +395,17 @@ export class City {
 
   // ===== Buildings inside the track oval (inner field) =====
   _placeInnerCity() {
-    // Fill the inner oval with a grid of low-poly buildings.
-    // The inner area is: x in [-halfStraight, halfStraight], z in [-turnR, turnR]
-    // We want to leave a 6m gap from the inside of the road for visibility + safety.
-    const inset = 6;
+    // Fill the inner oval with a dense grid of low-poly buildings (slop-newyork style).
+    // Inner area: x in [-halfStraight, halfStraight], z in [-turnR, turnR].
+    // Leave a 4m gap from the road for visibility.
+    const inset = 4;
     const innerMinX = -TRACK.halfStraight + inset;
     const innerMaxX =  TRACK.halfStraight - inset;
     const innerMinZ = -TRACK.turnRadius + inset;
     const innerMaxZ =  TRACK.turnRadius - inset;
 
-    const block = 14;   // building footprint ~12m + 2m gap
+    // Smaller blocks = denser city (slop-newyork uses ~12m blocks with varied lots)
+    const block = 10;
     const cols = Math.floor((innerMaxX - innerMinX) / block);
     const rows = Math.floor((innerMaxZ - innerMinZ) / block);
 
@@ -417,28 +418,40 @@ export class City {
       0xc87050,  // rust
       0xb0c4a8,  // sage
       0xe0d090,  // mustard
+      0xa8b8d0,  // steel blue
+      0xd8a890,  // peach
+      0x80a860,  // forest green
+      0xc0a060,  // ochre
     ];
+
+    // Use a deterministic RNG so the city looks the same every reload
+    let seed = 12345;
+    const rand = () => {
+      seed = (seed * 9301 + 49297) % 233280;
+      return seed / 233280;
+    };
 
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        // Skip a few cells to leave room for "streets" / plazas
-        if (Math.random() < 0.18) continue;
+        // Skip fewer cells — denser city
+        if (rand() < 0.12) continue;
 
-        const x = innerMinX + (c + 0.5) * block + (Math.random() - 0.5) * 2;
-        const z = innerMinZ + (r + 0.5) * block + (Math.random() - 0.5) * 2;
+        const x = innerMinX + (c + 0.5) * block + (rand() - 0.5) * 1.5;
+        const z = innerMinZ + (r + 0.5) * block + (rand() - 0.5) * 1.5;
 
         // Skip if inside an end-cap circle (where x is beyond straight section)
         if (Math.abs(x) > TRACK.halfStraight) {
-          // Check if inside the curve circle
           const cx = Math.sign(x) * TRACK.halfStraight;
           const dist = Math.sqrt((x - cx) ** 2 + z ** 2);
           if (dist > TRACK.turnRadius - inset) continue;
         }
 
-        const w = 8 + Math.random() * 4;
-        const d = 8 + Math.random() * 4;
-        const h = 8 + Math.random() * 24;
-        const color = lagosColors[Math.floor(Math.random() * lagosColors.length)];
+        // Varied building sizes — some tall, some short, some wide
+        const w = 6 + rand() * 4;
+        const d = 6 + rand() * 4;
+        // Most buildings 8-20m, occasional towers up to 40m
+        const h = rand() < 0.85 ? 8 + rand() * 14 : 22 + rand() * 18;
+        const color = lagosColors[Math.floor(rand() * lagosColors.length)];
 
         this._makeBuilding(x, z, w, h, d, color);
       }
